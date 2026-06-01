@@ -1,132 +1,109 @@
-````markdown
-# 📜 ScriptChain Smart Contracts
+# StellarTip Contracts
 
-This repository contains the smart contracts powering **ScriptChain**, a blockchain-based literature platform that rewards reader engagement, manages book ownership, enables interactive games, and integrates tokenized incentives.
+Soroban smart contract for a decentralized micro-tipping platform on Stellar.
 
-Built on **Starknet** using **Cairo 1.0**, these contracts are designed for secure, transparent, and scalable interactions between users and the platform.
+## Overview
 
----
+StellarTip allows creators to register profiles and receive instant micro-payments
+(tips) from supporters using any Stellar asset (XLM, USDC, etc.). Tips are held in
+the contract until creators withdraw them, and every tip is recorded on-chain for
+transparency.
 
-## 🔒 Core Contracts
+## Features
 
-| Contract Name         | Description |
-|-----------------------|-------------|
-| `RewardToken.cairo`   | ERC20-style token contract to reward user engagement. |
-| `EngagementRewarder.cairo` | Tracks reading activity and distributes tokens to readers. |
-| `QuizGame.cairo`      | Quiz/prediction game logic with on-chain rewards. |
-| `BookNFT.cairo`       | Optional ERC721 contract for tokenized book ownership. |
-| `Marketplace.cairo`   | Book marketplace accepting crypto payments. |
-| `AccessControl.cairo` | Role-based permissions (admin, reader, oracle, etc.). |
+- **Creator Profiles** – register with a unique username, display name, and bio
+- **Username-based lookup** – find any creator by their username
+- **Multi-token tips** – supporters can tip in any Stellar asset
+- **On-chain history** – every tip is permanently recorded
+- **Self-custody withdrawal** – creators withdraw tips at any time
+- **Events** – all actions emit standard Soroban events for indexing
 
----
+## Contract Interface
 
-## 🧰 Tools & Requirements
+### Write Functions
 
-- [Starknet/Cairo 1.0](https://book.cairo-lang.org/)
-- [Protostar](https://docs.swmansion.com/protostar/)
-- [Starkli](https://github.com/xJonathanLEI/starkli) (optional CLI)
-- Python ≥ 3.8 for local scripts/tests
+| Function | Description |
+|----------|-------------|
+| `register(username, display_name, bio)` | Register as a creator |
+| `tip(creator, token, amount, message)` | Send a tip to a creator |
+| `withdraw(token, amount)` | Withdraw accumulated tips for a token |
 
----
+### View Functions
 
-## 🛠️ Setup & Compilation
+| Function | Description |
+|----------|-------------|
+| `get_profile(address)` | Get a creator's profile |
+| `get_creator_from_username(username)` | Resolve a username to an address |
+| `get_balance(creator, token)` | Check a creator's balance for a token |
+| `get_tip_count(creator)` | Get total tips received |
+| `get_tip(creator, index)` | Get a specific tip record |
+| `is_creator(address)` | Check if an address is registered |
+| `is_username_taken(username)` | Check if a username is claimed |
 
-### Clone the Repo
+## Getting Started
 
-```bash
-git clone https://github.com/yourusername/scriptchain-contracts.git
-cd scriptchain-contracts
-````
+### Prerequisites
 
-### Install Protostar
+- Rust (nightly) – <https://rustup.rs>
+- Soroban CLI – `cargo install soroban-cli`
+- Stellar CLI – `cargo install stellar-cli`
 
-```bash
-curl -L https://raw.githubusercontent.com/software-mansion/protostar/master/install.sh | bash
-source ~/.bashrc
-```
-
-### Build Contracts
-
-```bash
-protostar build
-```
-
----
-
-## 🚀 Deployment
-
-Update your `protostar.toml` or CLI args with your Starknet RPC and wallet details.
+### Build
 
 ```bash
-protostar deploy ./build/RewardToken.json
-protostar deploy ./build/EngagementRewarder.json
+cargo build --release
 ```
 
-For testnet (e.g., Sepolia or Starknet Testnet):
+### Test
 
 ```bash
-protostar deploy ./build/RewardToken.json --network testnet
+cargo test
 ```
 
----
-
-## 🧪 Testing
-
-All tests are written in Cairo using `protostar`.
+### Deploy (testnet)
 
 ```bash
-protostar test ./tests
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/stellar_tip.wasm \
+  --network testnet \
+  --source <your-identity>
 ```
 
----
-
-## 📁 Folder Structure
+## Contract Architecture
 
 ```
-contracts/
-├── RewardToken.cairo
-├── EngagementRewarder.cairo
-├── QuizGame.cairo
-├── BookNFT.cairo
-├── AccessControl.cairo
-└── Marketplace.cairo
-
-tests/
-├── test_reward_token.cairo
-├── test_engagement_rewarder.cairo
-└── ...
+User (supporter)        TipContract          Token Contract
+      │                      │                     │
+      │── tip(creator,amt) ──│                     │
+      │                      │── transfer(from) ──│
+      │                      │←────── ok ─────────│
+      │←────── tip index ────│                     │
+      │                      │                     │
+      │── withdraw(token,amt)│                     │
+      │                      │── transfer(creator)│
+      │←────── tokens ───────│                     │
 ```
 
----
+Tip flow:
+1. Supporter calls `tip()` – the Stellar wallet prompts them to sign the
+   authorization
+2. The contract calls `transfer()` on the **Stellar Asset Contract** (SAC) to
+   pull tokens from the supporter into the contract
+3. The creator's internal balance is updated and the tip is recorded
+4. Later, the creator calls `withdraw()` – the contract sends the accumulated
+   tokens back to the creator
 
-## 🔐 Security Notes
-
-* Follows Starknet best practices for access control, upgradability, and gas efficiency.
-* Includes pause mechanisms and role checks for critical functions.
-* Formal audits will be conducted prior to mainnet deployment.
-
----
-
-## 🧭 Roadmap
-
-* [x] Deploy testnet `RewardToken`
-* [x] Build & test `EngagementRewarder`
-* [x] Integrate quiz logic into `QuizGame`
-* [ ] Implement book purchase logic in `Marketplace`
-* [ ] Add DAO-style voting for community proposals
-
----
-
-## 📜 License
-
-MIT License © 2025 ScriptChain Contributors
-
----
-
-## 🤝 Contributing
-
-PRs and suggestions are welcome! See `CONTRIBUTING.md` for coding standards and review process.
+## Project Structure
 
 ```
+├── Cargo.toml          # Rust / Soroban dependencies
+├── src/
+│   ├── lib.rs          # Contract logic
+│   └── test.rs         # Unit tests
+├── .gitignore
+└── README.md
+```
 
+## License
 
+MIT
