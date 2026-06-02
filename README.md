@@ -63,11 +63,28 @@ cargo test
 ### Deploy (testnet)
 
 ```bash
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/stellar_tip.wasm \
-  --network testnet \
-  --source <your-identity>
+make deploy-testnet
+# or directly:
+./scripts/deploy.sh testnet
 ```
+
+### Deploy (mainnet)
+
+```bash
+make deploy-mainnet
+# or directly:
+./scripts/deploy.sh mainnet
+```
+
+### Makefile Targets
+
+| Target            | Description                        |
+|-------------------|------------------------------------|
+| `make build`      | Build the contract (release)       |
+| `make test`       | Run all tests                      |
+| `make clean`      | Remove build artifacts             |
+| `make deploy-testnet` | Deploy to Stellar testnet      |
+| `make deploy-mainnet` | Deploy to Stellar mainnet      |
 
 ## Contract Architecture
 
@@ -103,6 +120,12 @@ Tip flow:
 ├── .gitignore
 └── README.md
 ```
+
+## Project Status
+
+![CI](https://github.com/StellarTips/StellarTip-Contract/actions/workflows/ci.yml/badge.svg)
+
+Automated CI runs tests and builds on every push and pull request. Deployments are automated via GitHub Actions on version tags.
 
 ## License
 
