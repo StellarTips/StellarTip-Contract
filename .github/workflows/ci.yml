@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Run tests
+        run: cargo test
+      - name: Build release
+        run: cargo build --release
+      - name: Verify WASM artifact exists
+        run: |
+          wasm_file="target/wasm32-unknown-unknown/release/stellar_tip.wasm"
+          if [ -f "$wasm_file" ]; then
+            echo "WASM artifact created successfully: $(ls -lh "$wasm_file")"
+          else
+            echo "WASM artifact not found at $wasm_file"
+            exit 1
+          fi
