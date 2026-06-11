@@ -46,7 +46,7 @@ jobs:
           path: target/wasm32-unknown-unknown/release/stellar_tip.wasm
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: target/wasm32-unknown-unknown/release/stellar_tip.wasm
           generate_release_notes: true
