@@ -49,7 +49,31 @@
         }
       ]
     ],
-    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "function_name": "init",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u32": 500
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
@@ -172,7 +196,7 @@
     "base_reserve": 10,
     "min_persistent_entry_ttl": 10,
     "min_temp_entry_ttl": 10,
-    "max_entry_ttl": 100000,
+    "max_entry_ttl": 1000000,
     "ledger_entries": [
       [
         {
@@ -232,7 +256,40 @@
             },
             "ext": "v0"
           },
-          100099
+          1000099
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 1033654523790656264
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 1033654523790656264
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          1000099
         ]
       ],
       [
@@ -286,7 +343,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -335,7 +392,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -430,7 +487,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -475,7 +532,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -619,7 +676,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -628,7 +685,7 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 4837995959683129791
+                "nonce": 2032731177588607455
               }
             },
             "durability": "temporary"
@@ -643,7 +700,7 @@
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
                 "key": {
                   "ledger_key_nonce": {
-                    "nonce": 4837995959683129791
+                    "nonce": 2032731177588607455
                   }
                 },
                 "durability": "temporary",
@@ -652,7 +709,7 @@
             },
             "ext": "v0"
           },
-          100099
+          1000099
         ]
       ],
       [
@@ -685,7 +742,7 @@
             },
             "ext": "v0"
           },
-          100099
+          1000099
         ]
       ],
       [
@@ -694,7 +751,7 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 1033654523790656264
+                "nonce": 4837995959683129791
               }
             },
             "durability": "temporary"
@@ -709,7 +766,7 @@
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
                 "key": {
                   "ledger_key_nonce": {
-                    "nonce": 1033654523790656264
+                    "nonce": 4837995959683129791
                   }
                 },
                 "durability": "temporary",
@@ -718,7 +775,7 @@
             },
             "ext": "v0"
           },
-          100099
+          1000099
         ]
       ],
       [
@@ -727,7 +784,7 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 2032731177588607455
+                "nonce": 4270020994084947596
               }
             },
             "durability": "temporary"
@@ -742,7 +799,7 @@
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
                 "key": {
                   "ledger_key_nonce": {
-                    "nonce": 2032731177588607455
+                    "nonce": 4270020994084947596
                   }
                 },
                 "durability": "temporary",
@@ -751,7 +808,7 @@
             },
             "ext": "v0"
           },
-          100099
+          1000099
         ]
       ],
       [
@@ -824,7 +881,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -897,7 +954,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -970,7 +1027,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -1043,7 +1100,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ],
       [
@@ -1155,7 +1212,7 @@
             },
             "ext": "v0"
           },
-          100099
+          121060
         ]
       ],
       [
@@ -1176,7 +1233,7 @@
             },
             "ext": "v0"
           },
-          100099
+          518500
         ]
       ]
     ]
