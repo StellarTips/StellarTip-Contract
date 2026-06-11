@@ -426,6 +426,7 @@ impl TipContract {
         message: String,
     ) -> u64 {
         from.require_auth();
+        check_initialized_and_not_paused(&env);
 
         if amount <= 0 {
             panic_with_error!(env, TipError::InvalidAmount);
@@ -436,11 +437,29 @@ impl TipContract {
             panic_with_error!(env, TipError::CreatorNotFound);
         }
 
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(0);
+        let fee = (amount * (fee_bps as i128)) / (MAX_FEE_BPS as i128);
+        let creator_amount = amount - fee;
+
         // 1. Transfer tokens from sender → this contract.
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&from, &env.current_contract_address(), &amount);
 
-        // 2. Credit the creator's internal balance.
+        // 2. Forward fee to recipient.
+        if fee > 0 {
+            let fee_recipient: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeRecipient)
+                .unwrap();
+            token_client.transfer(&env.current_contract_address(), &fee_recipient, &fee);
+        }
+
+        // 3. Credit the creator's internal balance.
         let balance_key = DataKey::Balance(creator.clone(), token.clone());
         let current_balance: i128 = env
             .storage()
@@ -449,11 +468,29 @@ impl TipContract {
             .unwrap_or(0_i128);
         env.storage()
             .persistent()
-            .set(&balance_key, &(current_balance + amount));
+            .set(&balance_key, &(current_balance + creator_amount));
+        extend_persistent_ttl(&env, &balance_key);
 
-        // 3. Record the tip.
+        // 4. Track token for creator.
+        let tokens_key = DataKey::CreatorTokens(creator.clone());
+        let mut tokens: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&tokens_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !tokens.contains(&token) {
+            tokens.push_back(token.clone());
+            env.storage().persistent().set(&tokens_key, &tokens);
+        }
+        extend_persistent_ttl(&env, &tokens_key);
+
+        // 5. Record the tip.
         let tip_count_key = DataKey::TipCount(creator.clone());
-        let index: u64 = env.storage().instance().get(&tip_count_key).unwrap_or(0);
+        let index: u64 = env
+            .storage()
+            .persistent()
+            .get(&tip_count_key)
+            .unwrap_or(0);
         let tip = Tip {
             from: from.clone(),
             token: token.clone(),
@@ -464,11 +501,13 @@ impl TipContract {
         env.storage()
             .persistent()
             .set(&DataKey::Tip(creator.clone(), index), &tip);
+        extend_persistent_ttl(&env, &DataKey::Tip(creator.clone(), index));
         env.storage()
-            .instance()
+            .persistent()
             .set(&tip_count_key, &(index + 1));
+        extend_persistent_ttl(&env, &tip_count_key);
 
-        // 4. Emit event.
+        // 6. Emit event.
         env.events().publish(
             (EVENT_TIP_SENT, from.clone()),
             (creator, token, amount, index),
