@@ -310,6 +310,8 @@ impl TipContract {
         bio: String,
     ) {
         caller.require_auth();
+        check_initialized_and_not_paused(&env);
+        validate_input(&env, Some(username.clone()), &display_name, &bio);
 
         // Each address can only register once.
         if env.storage().instance().has(&DataKey::Profile(caller.clone())) {
@@ -330,7 +332,9 @@ impl TipContract {
 
         env.storage().instance().set(&DataKey::Profile(caller.clone()), &profile);
         env.storage().instance().set(&DataKey::UsernameToAddress(username), &caller);
-        env.storage().instance().set(&DataKey::TipCount(caller.clone()), &0u64);
+        // TipCount moved to persistent storage for durability.
+        env.storage().persistent().set(&DataKey::TipCount(caller.clone()), &0u64);
+        extend_persistent_ttl(&env, &DataKey::TipCount(caller.clone()));
 
         env.events().publish(
             (EVENT_CREATOR_REGISTERED, caller),
