@@ -342,6 +342,70 @@ impl TipContract {
         );
     }
 
+    /// Update a creator's display name and bio.
+    pub fn update_profile(env: Env, caller: Address, display_name: String, bio: String) {
+        caller.require_auth();
+        check_initialized_and_not_paused(&env);
+        validate_input(&env, None, &display_name, &bio);
+
+        let mut profile: CreatorProfile = env
+            .storage()
+            .instance()
+            .get(&DataKey::Profile(caller.clone()))
+            .unwrap_or_else(|| panic_with_error!(env, TipError::CreatorNotFound));
+
+        profile.display_name = display_name;
+        profile.bio = bio;
+
+        env.storage().instance().set(&DataKey::Profile(caller.clone()), &profile);
+        extend_instance_ttl(&env);
+
+        env.events().publish(
+            (EVENT_PROFILE_UPDATED, caller),
+            (profile.username, profile.display_name.clone()),
+        );
+    }
+
+    /// Unregister a creator. Requires all token balances to be zero.
+    pub fn unregister(env: Env, caller: Address) {
+        caller.require_auth();
+        check_initialized_and_not_paused(&env);
+
+        let profile: CreatorProfile = env
+            .storage()
+            .instance()
+            .get(&DataKey::Profile(caller.clone()))
+            .unwrap_or_else(|| panic_with_error!(env, TipError::CreatorNotFound));
+
+        // Ensure all balances are zero.
+        let tokens_key = DataKey::CreatorTokens(caller.clone());
+        if let Some(tokens) = env
+            .storage()
+            .persistent()
+            .get::<_, Vec<Address>>(&tokens_key)
+        {
+            for token in tokens.iter() {
+                let balance = env
+                    .storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::Balance(caller.clone(), token))
+                    .unwrap_or(0);
+                if balance > 0 {
+                    panic_with_error!(env, TipError::BalanceNotEmpty);
+                }
+            }
+            env.storage().persistent().remove(&tokens_key);
+        }
+
+        let tip_count_key = DataKey::TipCount(caller.clone());
+        env.storage().persistent().remove(&tip_count_key);
+
+        env.storage().instance().remove(&DataKey::UsernameToAddress(profile.username));
+        env.storage().instance().remove(&DataKey::Profile(caller.clone()));
+
+        env.events().publish((EVENT_CREATOR_UNREGISTERED, caller), ());
+    }
+
     // -----------------------------------------------------------------------
     // Tipping
     // -----------------------------------------------------------------------
