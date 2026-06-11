@@ -184,6 +184,115 @@ pub struct TipContract;
 #[contractimpl]
 impl TipContract {
     // -----------------------------------------------------------------------
+    // Initialization
+    // -----------------------------------------------------------------------
+
+    /// Initialize the contract with an admin, fee recipient, and platform fee.
+    ///
+    /// # Arguments
+    /// * `admin` – Address with privileged control (pause, fee settings).
+    /// * `fee_recipient` – Address that receives platform fees.
+    /// * `fee_bps` – Platform fee in basis points (0–10_000).
+    pub fn init(env: Env, admin: Address, fee_recipient: Address, fee_bps: u32) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic_with_error!(env, TipError::AlreadyInitialized);
+        }
+        if fee_bps > MAX_FEE_BPS {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
+        env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        extend_instance_ttl(&env);
+    }
+
+    // -----------------------------------------------------------------------
+    // Admin functions
+    // -----------------------------------------------------------------------
+
+    /// Transfer admin privileges to a new address.
+    pub fn set_admin(env: Env, caller: Address, new_admin: Address) {
+        caller.require_auth();
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != current_admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        extend_instance_ttl(&env);
+    }
+
+    /// Pause the contract (emergency stop). Only admin can call.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_PAUSED, caller), ());
+    }
+
+    /// Unpause the contract. Only admin can call.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_UNPAUSED, caller), ());
+    }
+
+    /// Set the platform fee percentage. Only admin can call.
+    pub fn set_fee_percentage(env: Env, caller: Address, fee_bps: u32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        if fee_bps > MAX_FEE_BPS {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
+        env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_FEE_CHANGED, caller), fee_bps);
+    }
+
+    /// Set the fee recipient address. Only admin can call.
+    pub fn set_fee_recipient(env: Env, caller: Address, fee_recipient: Address) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
+        extend_instance_ttl(&env);
+    }
+
+    // -----------------------------------------------------------------------
     // Registration
     // -----------------------------------------------------------------------
 
