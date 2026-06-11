@@ -9,6 +9,14 @@ use soroban_sdk::{contract, contractimpl, contracttype, panic_with_error, token,
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    /// Admin address with privileged access.
+    Admin,
+    /// Pause flag for emergency stop.
+    Paused,
+    /// Platform fee in basis points (0–10_000).
+    FeeBps,
+    /// Address that receives platform fees.
+    FeeRecipient,
     /// Creator profile keyed by the creator's `Address`.
     Profile(Address),
     /// Reverse lookup: `Symbol` (username) → `Address` (creator).
@@ -20,6 +28,8 @@ pub enum DataKey {
     TipCount(Address),
     /// Single tip record identified by `(creator Address, index)`.
     Tip(Address, u64),
+    /// List of tokens a creator has received tips in.
+    CreatorTokens(Address),
 }
 
 /// Public profile information for a creator.
