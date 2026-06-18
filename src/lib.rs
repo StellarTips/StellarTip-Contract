@@ -519,16 +519,13 @@ impl TipContract {
         env.storage().persistent().remove(&tip_count_key);
 
         env.storage().instance().remove(&DataKey::UsernameToAddress(profile.username));
-        env.storage().instance().remove(&DataKey::Profile(caller.clone()));
-
-        // Decrement the global creator count now that the profile is gone.
+        env.storage().instance().remove(&DataKey::Profile(caller.clone()));        // Decrement the global creator count now that the profile is gone.
         let current_count: u32 = env
             .storage()
             .instance()
             .get(&DataKey::CreatorCount)
             .unwrap_or(0);
         if current_count > 0 {
-            env.storage()        if current_count > 0 {
             env.storage()
                 .instance()
                 .set(&DataKey::CreatorCount, &(current_count - 1));
