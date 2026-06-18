@@ -66,6 +66,12 @@
                 },
                 {
                   "u32": 0
+                },
+                {
+                  "u32": 10000
+                },
+                {
+                  "u32": 10000
                 }
               ]
             }
@@ -625,6 +631,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "CreatorCount"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "FeeBps"
                             }
                           ]
@@ -643,6 +661,30 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "MaxCreators"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 10000
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "MaxTipsPerCreator"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 10000
                         }
                       },
                       {

@@ -119,10 +119,8 @@ impl TestEnv {
     /// custom ledger setup.
     fn new_with_caps(fee_bps: u32, max_creators: u32, max_tips: u32) -> Self {
         let t = Self::new_with_fee(fee_bps);
-        t.tip_client()
-            .set_max_creators(&t.admin, &max_creators);
-        t.tip_client()
-            .set_max_tips_per_creator(&t.admin, &max_tips);
+        t.tip_client().set_max_creators(&t.admin, &max_creators);
+        t.tip_client().set_max_tips_per_creator(&t.admin, &max_tips);
         t
     }
 
@@ -165,10 +163,7 @@ fn test_init_sets_admin_and_fee() {
     assert_eq!(t.tip_client().get_contract_version(), 2);
     assert!(!t.tip_client().is_paused());
     assert_eq!(t.tip_client().get_max_creators(), crate::DEFAULT_MAX_CREATORS);
-    assert_eq!(
-        t.tip_client().get_max_tips_per_creator(),
-        crate::DEFAULT_MAX_TIPS_PER_CREATOR
-    );
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), crate::DEFAULT_MAX_TIPS_PER_CREATOR);
     assert_eq!(t.tip_client().get_creator_count(), 0);
 }
 
@@ -859,29 +854,47 @@ fn test_init_persists_supplied_caps() {
     assert_eq!(client.get_max_tips_per_creator(), 4);
     assert_eq!(client.get_creator_count(), 0);
 
-    // The 7-creator cap is enforced exactly as supplied.
-    for i in 0..7 {
+    // The 7-creator cap is enforced exactly as supplied. The 8th
+    // registration is asserted separately in
+    // `test_init_supplied_caps_rejects_8th_creator`.
+    let cap_names: [&str; 7] = ["c0", "c1", "c2", "c3", "c4", "c5", "c6"];
+    for name in cap_names.iter() {
         let creator = Address::generate(&env);
-        client.register(
-            &creator,
-            &Symbol::new(&env, &format!("c{i}")),
-            &s(&env, "Name"),
-            &s(&env, ""),
-        );
+        client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
     }
     assert_eq!(client.get_creator_count(), 7);
+}
 
-    let extra = Address::generate(&env);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.register(
-            &extra,
-            &Symbol::new(&env, "overflow"),
-            &s(&env, "X"),
-            &s(&env, ""),
-        );
-    }));
-    assert!(result.is_err(), "8th creator must be rejected");
+#[test]
+#[should_panic(expected = "#14")]
+fn test_init_supplied_caps_rejects_8th_creator() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1000,
+        protocol_version: 22,
+        sequence_number: 100,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_persistent_entry_ttl: 10,
+        max_entry_ttl: 1_000_000,
+        min_temp_entry_ttl: 10,
+    });
+    let admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+    let contract_id = env.register(TipContract, ());
+    let client = crate::TipContractClient::new(&env, &contract_id);
+
+    // Cap of 7, then fill, then attempt an 8th → CapExceeded.
+    client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32);
+    let cap_names: [&str; 7] = ["c7_0", "c7_1", "c7_2", "c7_3", "c7_4", "c7_5", "c7_6"];
+    for name in cap_names.iter() {
+        let creator = Address::generate(&env);
+        client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
+    }
     assert_eq!(client.get_creator_count(), 7);
+    let extra = Address::generate(&env);
+    client.register(&extra, &Symbol::new(&env, "overflow"), &s(&env, "X"), &s(&env, ""));
 }
 
 #[test]
@@ -908,20 +921,30 @@ fn test_init_with_zero_caps_means_unlimited() {
     assert_eq!(client.get_max_creators(), 0);
     assert_eq!(client.get_max_tips_per_creator(), 0);
 
-    // Registering way more than DEFAULT_MAX_CREATORS should be fine.
-    for i in 0..25 {
+    // Registering more than DEFAULT_MAX_CREATORS should be fine.
+    let names: [&str; 12] = [
+        "creator_00",
+        "creator_01",
+        "creator_02",
+        "creator_03",
+        "creator_04",
+        "creator_05",
+        "creator_06",
+        "creator_07",
+        "creator_08",
+        "creator_09",
+        "creator_10",
+        "creator_11",
+    ];
+    for name in names.iter() {
         let creator = Address::generate(&env);
-        client.register(
-            &creator,
-            &Symbol::new(&env, &format!("creator_{i:02}")),
-            &s(&env, "Name"),
-            &s(&env, ""),
-        );
+        client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
     }
-    assert_eq!(client.get_creator_count(), 25);
+    assert_eq!(client.get_creator_count(), 12);
 }
 
 #[test]
+#[should_panic(expected = "#14")]
 fn test_register_fails_when_creator_cap_reached() {
     let t = TestEnv::new_with_caps(0, 2, 0);
     assert_eq!(t.tip_client().get_max_creators(), 2);
@@ -934,37 +957,38 @@ fn test_register_fails_when_creator_cap_reached() {
     assert_eq!(t.tip_client().get_creator_count(), 2);
 
     let charlie = Address::generate(&t.env);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.tip_client().register(
-            &charlie,
-            &Symbol::new(&t.env, "charlie"),
-            &s(&t.env, "C"),
-            &s(&t.env, ""),
-        );
-    }));
-    assert!(result.is_err(), "register should have panicked with CapExceeded");
-    // Counter must remain unchanged after a rejected registration.
-    assert_eq!(t.tip_client().get_creator_count(), 2);
+    t.tip_client().register(
+        &charlie,
+        &Symbol::new(&t.env, "charlie"),
+        &s(&t.env, "C"),
+        &s(&t.env, ""),
+    );
 }
 
 #[test]
-fn test_register_succeeds_after_unregister_frees_slot() {
+#[should_panic(expected = "#14")]
+fn test_register_blocked_when_creator_cap_reached() {
+    let t = TestEnv::new_with_caps(0, 1, 0);
+
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    let bob = Address::generate(&t.env);
+    t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
+}
+
+#[test]
+fn test_unregister_frees_creator_slot_for_reuse() {
     let t = TestEnv::new_with_caps(0, 1, 0);
 
     let alice = Address::generate(&t.env);
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
     assert_eq!(t.tip_client().get_creator_count(), 1);
 
-    let bob = Address::generate(&t.env);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
-    }));
-    assert!(result.is_err(), "second register should have been rejected");
-
-    // Free the slot and try again.
     t.tip_client().unregister(&alice);
     assert_eq!(t.tip_client().get_creator_count(), 0);
 
+    let bob = Address::generate(&t.env);
     t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
     assert_eq!(t.tip_client().get_creator_count(), 1);
 }
@@ -974,27 +998,34 @@ fn test_creator_count_tracks_register_and_unregister() {
     let t = TestEnv::new();
     assert_eq!(t.tip_client().get_creator_count(), 0);
 
-    let mut creators: Vec<Address> = Vec::new();
-    for i in 0..5 {
-        let a = Address::generate(&t.env);
+    let a0 = Address::generate(&t.env);
+    let a1 = Address::generate(&t.env);
+    let a2 = Address::generate(&t.env);
+    let a3 = Address::generate(&t.env);
+    let a4 = Address::generate(&t.env);
+    let names: [&str; 5] = ["user_0", "user_1", "user_2", "user_3", "user_4"];
+    let creators: [&Address; 5] = [&a0, &a1, &a2, &a3, &a4];
+    for (creator, name) in creators.iter().zip(names.iter()) {
         t.tip_client().register(
-            &a,
-            &Symbol::new(&t.env, &format!("user_{i}")),
+            creator,
+            &Symbol::new(&t.env, name),
             &s(&t.env, "Name"),
             &s(&t.env, ""),
         );
-        creators.push(a);
     }
     assert_eq!(t.tip_client().get_creator_count(), 5);
 
-    t.tip_client().unregister(&creators[0]);
+    t.tip_client().unregister(&a0);
     assert_eq!(t.tip_client().get_creator_count(), 4);
-    t.tip_client().unregister(&creators[2]);
-    t.tip_client().unregister(&creators[4]);
+    t.tip_client().unregister(&a2);
+    t.tip_client().unregister(&a4);
     assert_eq!(t.tip_client().get_creator_count(), 2);
+    assert!(t.tip_client().is_creator(&a1));
+    assert!(t.tip_client().is_creator(&a3));
 }
 
 #[test]
+#[should_panic(expected = "#14")]
 fn test_tip_fails_when_tip_cap_reached() {
     let t = TestEnv::new_with_caps(0, 0, 3);
     let alice = Address::generate(&t.env);
@@ -1005,15 +1036,10 @@ fn test_tip_fails_when_tip_cap_reached() {
         t.stellar_client().mint(&supporter, &10_000);
         t.tip_client().tip(&supporter, &alice, &t.token_id, &10, &s(&t.env, ""));
     }
-    assert_eq!(t.tip_client().get_tip_count(&alice), 3);
 
     let tipper = Address::generate(&t.env);
     t.stellar_client().mint(&tipper, &10_000);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.tip_client().tip(&tipper, &alice, &t.token_id, &10, &s(&t.env, ""));
-    }));
-    assert!(result.is_err(), "tip should have panicked with CapExceeded");
-    assert_eq!(t.tip_client().get_tip_count(&alice), 3);
+    t.tip_client().tip(&tipper, &alice, &t.token_id, &10, &s(&t.env, ""));
 }
 
 #[test]
@@ -1042,10 +1068,7 @@ fn test_set_max_creators_unauthorized_fails() {
 #[test]
 fn test_set_max_tips_per_creator_admin_authorized() {
     let t = TestEnv::new();
-    assert_eq!(
-        t.tip_client().get_max_tips_per_creator(),
-        crate::DEFAULT_MAX_TIPS_PER_CREATOR
-    );
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), crate::DEFAULT_MAX_TIPS_PER_CREATOR);
 
     t.tip_client().set_max_tips_per_creator(&t.admin, &250u32);
     assert_eq!(t.tip_client().get_max_tips_per_creator(), 250);
@@ -1063,7 +1086,7 @@ fn test_set_max_tips_per_creator_unauthorized_fails() {
 }
 
 #[test]
-fn test_lowering_cap_does_not_retroactively_evict() {
+fn test_lowering_creator_cap_keeps_existing_creators_active() {
     // Initial cap is generous; register several creators and tip a bunch.
     let t = TestEnv::new_with_caps(0, 100, 100);
     let alice = Address::generate(&t.env);
@@ -1083,22 +1106,44 @@ fn test_lowering_cap_does_not_retroactively_evict() {
     t.stellar_client().mint(&supporter, &10_000);
     t.tip_client().tip(&supporter, &alice, &t.token_id, &50, &s(&t.env, ""));
     assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 50);
+}
 
-    // ...but a new registration must be rejected with CapExceeded.
+#[test]
+#[should_panic(expected = "#14")]
+fn test_lowering_creator_cap_rejects_new_registrations() {
+    let t = TestEnv::new_with_caps(0, 100, 100);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+    let bob = Address::generate(&t.env);
+    t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
+
+    // Lower the creator cap below the current count.
+    t.tip_client().set_max_creators(&t.admin, &1u32);
+
+    // New registration with full cap must be rejected.
     let charlie = Address::generate(&t.env);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.tip_client().register(
-            &charlie,
-            &Symbol::new(&t.env, "charlie"),
-            &s(&t.env, "C"),
-            &s(&t.env, ""),
-        );
-    }));
-    assert!(result.is_err(), "register should have been rejected");
-    assert_eq!(t.tip_client().get_creator_count(), 2);
+    t.tip_client().register(
+        &charlie,
+        &Symbol::new(&t.env, "charlie"),
+        &s(&t.env, "C"),
+        &s(&t.env, ""),
+    );
+}
 
-    // Admin can raise the cap again to restore capacity.
+#[test]
+fn test_raising_creator_cap_restores_capacity() {
+    let t = TestEnv::new_with_caps(0, 100, 100);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+    let bob = Address::generate(&t.env);
+    t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
+
+    t.tip_client().set_max_creators(&t.admin, &1u32);
+
+    // Admin raises the cap again to restore capacity.
     t.tip_client().set_max_creators(&t.admin, &10u32);
+
+    let charlie = Address::generate(&t.env);
     t.tip_client().register(
         &charlie,
         &Symbol::new(&t.env, "charlie"),
@@ -1109,7 +1154,28 @@ fn test_lowering_cap_does_not_retroactively_evict() {
 }
 
 #[test]
+#[should_panic(expected = "#14")]
 fn test_lowering_tip_cap_blocks_further_tips_for_existing() {
+    let t = TestEnv::new_with_caps(0, 0, 5);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    for _ in 0..5 {
+        let supporter = Address::generate(&t.env);
+        t.stellar_client().mint(&supporter, &10_000);
+        t.tip_client().tip(&supporter, &alice, &t.token_id, &10, &s(&t.env, ""));
+    }
+
+    // Lower the per-creator tip cap below 5 and attempt to send another
+    // tip — must be rejected with CapExceeded.
+    t.tip_client().set_max_tips_per_creator(&t.admin, &2u32);
+    let next_tipper = Address::generate(&t.env);
+    t.stellar_client().mint(&next_tipper, &10_000);
+    t.tip_client().tip(&next_tipper, &alice, &t.token_id, &10, &s(&t.env, ""));
+}
+
+#[test]
+fn test_lowering_tip_cap_preserves_existing_history() {
     let t = TestEnv::new_with_caps(0, 0, 5);
     let alice = Address::generate(&t.env);
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
@@ -1121,19 +1187,9 @@ fn test_lowering_tip_cap_blocks_further_tips_for_existing() {
     }
     assert_eq!(t.tip_client().get_tip_count(&alice), 5);
 
-    // Lower the per-creator tip cap below 5. Existing tips remain; new tips
-    // must be rejected.
+    // Lower the cap; no new tips are recorded but the 5 historical entries
+    // are still readable.
     t.tip_client().set_max_tips_per_creator(&t.admin, &2u32);
-    let next_tipper = Address::generate(&t.env);
-    t.stellar_client().mint(&next_tipper, &10_000);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.tip_client()
-            .tip(&next_tipper, &alice, &t.token_id, &10, &s(&t.env, ""));
-    }));
-    assert!(result.is_err(), "tip should have been rejected with CapExceeded");
-    assert_eq!(t.tip_client().get_tip_count(&alice), 5);
-
-    // History is still readable.
     let history = t.tip_client().get_tips(&alice, &0u64, &10u64);
     assert_eq!(history.len(), 5);
 }

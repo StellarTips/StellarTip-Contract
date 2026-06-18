@@ -256,9 +256,7 @@ impl TipContract {
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::MaxCreators, &max_creators);
-        env.storage()
-            .instance()
-            .set(&DataKey::MaxTipsPerCreator, &max_tips_per_creator);
+        env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips_per_creator);
         env.storage().instance().set(&DataKey::CreatorCount, &0u32);
         extend_instance_ttl(&env);
     }
@@ -387,9 +385,7 @@ impl TipContract {
         if caller != admin {
             panic_with_error!(env, TipError::NotAuthorized);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::MaxTipsPerCreator, &max_tips);
+        env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips);
         extend_instance_ttl(&env);
         env.events().publish((EVENT_MAX_TIPS_CHANGED, caller), max_tips);
     }
@@ -427,16 +423,8 @@ impl TipContract {
         }
 
         // Enforce the global creator cap (skip if `MaxCreators == 0`).
-        let max_creators: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MaxCreators)
-            .unwrap_or(0);
-        let creator_count: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::CreatorCount)
-            .unwrap_or(0);
+        let max_creators: u32 = env.storage().instance().get(&DataKey::MaxCreators).unwrap_or(0);
+        let creator_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
         if max_creators > 0 && creator_count >= max_creators {
             panic_with_error!(env, TipError::CapExceeded);
         }
@@ -456,9 +444,7 @@ impl TipContract {
 
         // Bump the global creator count last, after every other check has
         // succeeded, so we never dirty it on a failed registration.
-        env.storage()
-            .instance()
-            .set(&DataKey::CreatorCount, &(creator_count + 1));
+        env.storage().instance().set(&DataKey::CreatorCount, &(creator_count + 1));
 
         env.events()
             .publish((EVENT_CREATOR_REGISTERED, caller), (profile.username, profile.registered_at));
@@ -519,16 +505,10 @@ impl TipContract {
         env.storage().persistent().remove(&tip_count_key);
 
         env.storage().instance().remove(&DataKey::UsernameToAddress(profile.username));
-        env.storage().instance().remove(&DataKey::Profile(caller.clone()));        // Decrement the global creator count now that the profile is gone.
-        let current_count: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::CreatorCount)
-            .unwrap_or(0);
+        env.storage().instance().remove(&DataKey::Profile(caller.clone())); // Decrement the global creator count now that the profile is gone.
+        let current_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
         if current_count > 0 {
-            env.storage()
-                .instance()
-                .set(&DataKey::CreatorCount, &(current_count - 1));
+            env.storage().instance().set(&DataKey::CreatorCount, &(current_count - 1));
         }
 
         env.events().publish((EVENT_CREATOR_UNREGISTERED, caller), ());
@@ -568,11 +548,7 @@ impl TipContract {
         // Enforce the per-creator tip-history cap. The `TipCount` value
         // already lives in persistent storage, so we read it once and use
         // it both for the cap check and as the new tip's index below.
-        let max_tips: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MaxTipsPerCreator)
-            .unwrap_or(0);
+        let max_tips: u32 = env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0);
         let tip_count_key = DataKey::TipCount(creator.clone());
         let index: u64 = env.storage().persistent().get(&tip_count_key).unwrap_or(0);
         if max_tips > 0 && index >= max_tips as u64 {
@@ -805,19 +781,13 @@ impl TipContract {
     /// Return the configured per-creator tip-history cap. `0` means the cap
     /// is disabled (unlimited tips per creator).
     pub fn get_max_tips_per_creator(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::MaxTipsPerCreator)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0)
     }
 
     /// Return the current count of registered creators. Tracked alongside
     /// `MaxCreators` so cap enforcement is O(1).
     pub fn get_creator_count(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::CreatorCount)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0)
     }
 }
 
