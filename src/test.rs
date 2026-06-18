@@ -619,6 +619,40 @@ fn test_tip_zero_amount_fails() {
     t.tip_client().tip(&bob, &alice, &t.token_id, &0, &s(&t.env, ""));
 }
 
+// Regression test for issue #28:
+// when `fee_bps > 0` is configured but `FeeRecipient` is unset in instance
+// storage, `tip()` must surface a clean `FeeRecipientNotSet` error rather
+// than an unrecoverable panic that would DoS tipping.
+#[test]
+#[should_panic(expected = "#14")]
+fn test_tip_with_fee_recipient_unset_fails() {
+    let t = TestEnv::new();
+
+    // Configure a non-zero fee (this normally requires the recipient to be
+    // set; we deliberately invalidate storage below to simulate a corrupted
+    // / missing recipient state).
+    t.tip_client().set_fee_percentage(&t.admin, &500u32);
+
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(
+        &alice,
+        &Symbol::new(&t.env, "alice"),
+        &s(&t.env, "Alice"),
+        &s(&t.env, ""),
+    );
+
+    // Remove the `FeeRecipient` key from the contract's instance storage to
+    // reproduce the failing precondition.
+    let contract_id = t.contract_id.clone();
+    t.env.as_contract(&contract_id, || {
+        t.env.storage().instance().remove(&crate::DataKey::FeeRecipient);
+    });
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
+}
+
 // ---------------------------------------------------------------------------
 // Withdrawal tests
 // ---------------------------------------------------------------------------

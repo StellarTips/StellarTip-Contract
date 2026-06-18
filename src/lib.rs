@@ -79,6 +79,9 @@ mod error {
         NotAuthorized = 11,
         InvalidInput = 12,
         BalanceNotEmpty = 13,
+        /// Returned when a non-zero `fee_bps` is configured but the
+        /// `FeeRecipient` storage key is missing (e.g. corrupted state).
+        FeeRecipientNotSet = 14,
     }
 }
 
@@ -442,14 +445,27 @@ impl TipContract {
         let fee = (amount * (fee_bps as i128)) / (MAX_FEE_BPS as i128);
         let creator_amount = amount - fee;
 
+        // Fail-fast: if a non-zero fee is configured but the fee recipient is
+        // not configured (corrupted / unset storage), abort before touching
+        // external token contracts.
+        let opt_fee_recipient: Option<Address> =
+            env.storage().instance().get(&DataKey::FeeRecipient);
+        if fee_bps > 0 && opt_fee_recipient.is_none() {
+            panic_with_error!(env, TipError::FeeRecipientNotSet);
+        }
+
         // 1. Transfer tokens from sender → this contract.
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&from, &env.current_contract_address(), &amount);
 
         // 2. Forward fee to recipient.
         if fee > 0 {
-            let fee_recipient: Address =
-                env.storage().instance().get(&DataKey::FeeRecipient).unwrap();
+            // Safe to unwrap: validated above when fee_bps > 0. Use
+            // `unwrap_or_else` defensively to surface a clean contract error
+            // rather than a raw panic if storage ever goes missing between
+            // the check and here.
+            let fee_recipient: Address = opt_fee_recipient
+                .unwrap_or_else(|| panic_with_error!(env, TipError::FeeRecipientNotSet));
             token_client.transfer(&env.current_contract_address(), &fee_recipient, &fee);
         }
 
