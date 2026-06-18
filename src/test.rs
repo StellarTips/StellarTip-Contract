@@ -4,7 +4,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger, LedgerInfo},
     token,
     token::StellarAssetClient,
-    Address, Env, String, Symbol, TryIntoVal,
+    Address, Env, String, Symbol, TryIntoVal, Vec,
 };
 use token::Client as TokenClient;
 
@@ -145,6 +145,21 @@ impl TestEnv {
         sac.mint(&self.admin, &1_000_000_000);
         let client = TokenClient::new(&self.env, &id);
         (id, client, sac)
+    }
+
+    /// Deploy `count` additional Stellar asset tokens and mint the admin a
+    /// large balance on each. Used by tests that need many distinct tokens.
+    fn deploy_many_tokens(&self, count: usize) -> Vec<Address> {
+        let mut out: Vec<Address> = Vec::new(&self.env);
+        for _ in 0..count {
+            let token_admin = Address::generate(&self.env);
+            let token_contract = self.env.register_stellar_asset_contract_v2(token_admin);
+            let id = token_contract.address();
+            let sac = StellarAssetClient::new(&self.env, &id);
+            sac.mint(&self.admin, &1_000_000_000);
+            out.push_back(id);
+        }
+        out
     }
 }
 
@@ -1285,4 +1300,148 @@ fn test_lowering_tip_cap_preserves_existing_history() {
     t.tip_client().set_max_tips_per_creator(&t.admin, &2u32);
     let history = t.tip_client().get_tips(&alice, &0u64, &10u64);
     assert_eq!(history.len(), 5);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-token withdraw optimization tests (issue #38)
+// ---------------------------------------------------------------------------
+//
+// These tests confirm that the contract can manage many distinct tokens
+// for a single creator and that withdrawing each token's full balance
+// removes it from the tracked token set (now backed by Map<Address, ()>)
+// without relying on a linear scan.
+
+/// Register `alice` and tip them once with each of `count` distinct
+/// Stellar asset tokens. Returns the tracked token addresses in
+/// insertion order. Each supporting funder has enough balance to tip 1_000
+/// of their token.
+fn seed_creator_with_many_tokens(t: &TestEnv, alice: &Address, count: usize) -> Vec<Address> {
+    let tokens = t.deploy_many_tokens(count);
+    let n: u32 = count as u32;
+    for i in 0..n {
+        let token = tokens.get(i).unwrap();
+        let supporter = Address::generate(&t.env);
+        let sac = StellarAssetClient::new(&t.env, &token);
+        sac.mint(&supporter, &10_000);
+        t.tip_client().tip(&supporter, alice, &token, &1_000, &s(&t.env, ""));
+    }
+    tokens
+}
+
+#[test]
+fn test_withdraw_many_tokens_full_withdraw_clears_set() {
+    // Withdraw 12 distinct tokens in a non-sequential order; the
+    // map-backed CreatorTokens must drop each one in O(log n).
+    const N: u32 = 12;
+
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(
+        &alice,
+        &Symbol::new(&t.env, "alice"),
+        &s(&t.env, "Alice"),
+        &s(&t.env, ""),
+    );
+
+    let token_addrs = seed_creator_with_many_tokens(&t, &alice, N as usize);
+    assert_eq!(token_addrs.len(), N);
+
+    // Sanity check: every token is tracked and each balance is 1_000.
+    let tracked = t.tip_client().get_all_tokens(&alice);
+    assert_eq!(tracked.len(), N);
+    for i in 0..N {
+        let token = token_addrs.get(i).unwrap();
+        assert!(tracked.contains(&token), "tokens seeded should be tracked by the contract");
+        assert_eq!(t.tip_client().get_balance(&alice, &token), 1_000);
+    }
+
+    // Withdraw in non-sequential order so the map-backed removal is
+    // exercised from every position.
+    let order: [u32; 12] = [7, 0, 11, 3, 1, 9, 4, 6, 2, 10, 5, 8];
+    for &i in order.iter() {
+        let token = token_addrs.get(i).unwrap();
+        t.tip_client().withdraw(&alice, &token, &1_000);
+
+        // Removed token: gone from the tracked set and zero-balanced.
+        let remaining = t.tip_client().get_all_tokens(&alice);
+        assert!(!remaining.contains(&token), "token #{i} should be removed after full withdraw");
+        assert_eq!(t.tip_client().get_balance(&alice, &token), 0);
+    }
+
+    // After withdrawing every token fully, the tracked set is empty and the
+    // creator can unregister (which requires all balances to be zero).
+    assert_eq!(t.tip_client().get_all_tokens(&alice).len(), 0);
+    t.tip_client().unregister(&alice);
+    assert!(!t.tip_client().is_creator(&alice));
+}
+
+#[test]
+fn test_withdraw_many_tokens_partial_keeps_remaining() {
+    // A partial withdrawal of one of many tokens must NOT remove that
+    // token from the tracked set.
+    const N: u32 = 10;
+    const PARTIAL_IDX: u32 = 3;
+    const PARTIAL_AMOUNT: i128 = 400;
+
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(
+        &alice,
+        &Symbol::new(&t.env, "alice"),
+        &s(&t.env, "Alice"),
+        &s(&t.env, ""),
+    );
+
+    let token_addrs = seed_creator_with_many_tokens(&t, &alice, N as usize);
+    assert_eq!(token_addrs.len(), N);
+
+    // Partial withdraw on token #PARTIAL_IDX must leave the token present.
+    let partial_token = token_addrs.get(PARTIAL_IDX).unwrap();
+    t.tip_client().withdraw(&alice, &partial_token, &PARTIAL_AMOUNT);
+
+    let tracked = t.tip_client().get_all_tokens(&alice);
+    assert_eq!(tracked.len(), N);
+    for i in 0..N {
+        let token = token_addrs.get(i).unwrap();
+        let expected = if i == PARTIAL_IDX { 1_000 - PARTIAL_AMOUNT } else { 1_000 };
+        assert_eq!(t.tip_client().get_balance(&alice, &token), expected);
+        assert!(
+            tracked.contains(&token),
+            "partial withdraw must not remove token #{i} from the set"
+        );
+    }
+}
+
+#[test]
+fn test_unregister_after_withdrawing_all_many_tokens() {
+    // After fully withdrawing 11 distinct tokens, the storage entry backing
+    // the tracked token set should be removed; indirectly verified by
+    // `unregister` succeeding, since it iterates the tracked token set.
+    const N: u32 = 11;
+
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(
+        &alice,
+        &Symbol::new(&t.env, "alice"),
+        &s(&t.env, "Alice"),
+        &s(&t.env, ""),
+    );
+
+    let token_addrs = seed_creator_with_many_tokens(&t, &alice, N as usize);
+    assert_eq!(token_addrs.len(), N);
+
+    for i in 0..N {
+        let token = token_addrs.get(i).unwrap();
+        t.tip_client().withdraw(&alice, &token, &1_000);
+    }
+
+    assert_eq!(t.tip_client().get_all_tokens(&alice).len(), 0);
+
+    // `unregister` iterates the tracked token set to verify all balances
+    // are zero. If the map-backed removal left an inconsistent state this
+    // would panic with BalanceNotEmpty (#13).
+    t.tip_client().unregister(&alice);
+    assert!(!t.tip_client().is_creator(&alice));
+}
 }

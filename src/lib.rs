@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, token, Address, Env, String, Symbol,
-    Vec,
+    contract, contractimpl, contracttype, panic_with_error, token, Address, Env, Map, String,
+    Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,10 @@ pub enum DataKey {
     TipCount(Address),
     /// Single tip record identified by `(creator Address, index)`.
     Tip(Address, u64),
-    /// List of tokens a creator has received tips in.
+    /// Set of tokens a creator has received tips in.
+    /// Stored as a `Map<Address, ()>` so that per-token membership checks,
+    /// inserts, and removals run in O(log n) instead of the O(n) linear
+    /// scan required by a `Vec<Address>`.
     CreatorTokens(Address),
 }
 
@@ -493,8 +496,8 @@ impl TipContract {
 
         // Ensure all balances are zero.
         let tokens_key = DataKey::CreatorTokens(caller.clone());
-        if let Some(tokens) = env.storage().persistent().get::<_, Vec<Address>>(&tokens_key) {
-            for token in tokens.iter() {
+        if let Some(tokens) = env.storage().persistent().get::<_, Map<Address, ()>>(&tokens_key) {
+            for token in tokens.keys() {
                 let balance = env
                     .storage()
                     .persistent()
@@ -595,12 +598,14 @@ impl TipContract {
         env.storage().persistent().set(&balance_key, &(current_balance + creator_amount));
         extend_persistent_ttl(&env, &balance_key);
 
-        // 4. Track token for creator.
+        // 4. Track token for creator. The token set is stored as a
+        //    `Map<Address, ()>` so membership checks and inserts run in
+        //    O(log n) regardless of how many tokens the creator already has.
         let tokens_key = DataKey::CreatorTokens(creator.clone());
-        let mut tokens: Vec<Address> =
-            env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Vec::new(&env));
-        if !tokens.contains(&token) {
-            tokens.push_back(token.clone());
+        let mut tokens: Map<Address, ()> =
+            env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+        if !tokens.contains_key(token.clone()) {
+            tokens.set(token.clone(), ());
             env.storage().persistent().set(&tokens_key, &tokens);
         }
         extend_persistent_ttl(&env, &tokens_key);
@@ -665,20 +670,12 @@ impl TipContract {
             extend_persistent_ttl(&env, &tokens_key);
         } else {
             env.storage().persistent().remove(&balance_key);
-            // Remove token from CreatorTokens when balance is fully withdrawn.
-            let mut tokens: Vec<Address> =
-                env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Vec::new(&env));
-            let mut pos = None;
-            for i in 0..tokens.len() {
-                if let Some(t) = tokens.get(i) {
-                    if t == token {
-                        pos = Some(i);
-                        break;
-                    }
-                }
-            }
-            if let Some(i) = pos {
-                tokens.remove(i);
+            // Remove the token from the creator's tracked token set in
+            // O(log n). The host-backed `Map` performs this lookup and
+            // removal directly without scanning every entry.
+            let mut tokens: Map<Address, ()> =
+                env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+            if tokens.remove(token.clone()).is_some() {
                 if tokens.is_empty() {
                     env.storage().persistent().remove(&tokens_key);
                 } else {
@@ -758,10 +755,14 @@ impl TipContract {
 
     /// Return the list of tokens a creator has received tips in.
     pub fn get_all_tokens(env: Env, creator: Address) -> Vec<Address> {
-        env.storage()
+        match env
+            .storage()
             .persistent()
-            .get(&DataKey::CreatorTokens(creator))
-            .unwrap_or_else(|| Vec::new(&env))
+            .get::<_, Map<Address, ()>>(&DataKey::CreatorTokens(creator))
+        {
+            Some(tokens) => tokens.keys(),
+            None => Vec::new(&env),
+        }
     }
 
     /// Return the contract version.
