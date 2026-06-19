@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md` updated with new API documentation and architecture details
 
 ### Fixed
+- Issue #38: Optimize `withdraw()` token removal from `CreatorTokens`
+  - Replaced the `Vec<Address>` underlying `DataKey::CreatorTokens` with
+    a host-backed `Map<Address, ()>` so membership tests, inserts, and
+    removals run in O(log n) instead of the previous O(n) linear scan.
+  - `tip()`, `withdraw()`, `unregister()`, and `get_all_tokens()` updated
+    to use the `Map` API; the public contract surface is unchanged.
+  - Added three multi-token tests (12 / 10 / 11 tokens) covering full
+    out-of-order withdrawal, partial withdrawal, and `unregister`
+    after mass withdrawal.
 - Issue #19: Persistent Storage TTL Not Extended — Risk of Data Loss
   - All persistent storage reads and writes now call `extend_ttl`
   - `TipCount` moved from instance to persistent storage for durability
