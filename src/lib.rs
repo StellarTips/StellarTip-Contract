@@ -92,7 +92,7 @@ mod error {
         CapExceeded = 14,
         /// Returned when a non-zero `fee_bps` is configured but the
         /// `FeeRecipient` storage key is missing (e.g. corrupted state).
-        FeeRecipientNotSet = 14,
+        FeeRecipientNotSet = 15,
     }
 }
 

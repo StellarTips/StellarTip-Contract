@@ -203,7 +203,8 @@ fn test_init_emits_event() {
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Non-default fee bps so the payload cannot accidentally be zero.
-    client.init(&admin, &fee_recipient, &500u32);
+    // Use 0 for both caps (unlimited) since this test is about the init event.
+    client.init(&admin, &fee_recipient, &500u32, &0u32, &0u32);
 
     let events = env.events().all();
     let expected_name = Symbol::new(&env, "INIT");
@@ -719,7 +720,7 @@ fn test_tip_zero_amount_fails() {
 // storage, `tip()` must surface a clean `FeeRecipientNotSet` error rather
 // than an unrecoverable panic that would DoS tipping.
 #[test]
-#[should_panic(expected = "#14")]
+#[should_panic(expected = "#15")]
 fn test_tip_with_fee_recipient_unset_fails() {
     let t = TestEnv::new();
 
