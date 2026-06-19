@@ -24,9 +24,8 @@ use soroban_sdk::{
     token::StellarAssetClient,
     Address, Env, String, Symbol,
 };
-use token::Client as TokenClient;
-
 use stellar_tip::{TipContract, TipContractClient};
+use token::Client as TokenClient;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,9 +123,13 @@ fn test_e2e_register_tip_withdraw() {
 
     ctx.sac(&ctx.xlm_id).mint(&supporter, &10_000_000);
 
-    let tip_idx = ctx
-        .tip_client()
-        .tip(&supporter, &creator, &ctx.xlm_id, &500_000, &s(&ctx.env, "Great work!"));
+    let tip_idx = ctx.tip_client().tip(
+        &supporter,
+        &creator,
+        &ctx.xlm_id,
+        &500_000,
+        &s(&ctx.env, "Great work!"),
+    );
     assert_eq!(tip_idx, 0);
     assert_eq!(ctx.tip_client().get_balance(&creator, &ctx.xlm_id), 500_000);
 
@@ -247,12 +250,9 @@ fn test_e2e_multiple_creators() {
     ctx.sac(&ctx.xlm_id).mint(&supporter1, &100_000);
     ctx.sac(&ctx.xlm_id).mint(&supporter2, &100_000);
 
-    ctx.tip_client()
-        .tip(&supporter1, &alice, &ctx.xlm_id, &1_000, &s(&ctx.env, "for alice"));
-    ctx.tip_client()
-        .tip(&supporter1, &bob, &ctx.xlm_id, &2_000, &s(&ctx.env, "for bob"));
-    ctx.tip_client()
-        .tip(&supporter2, &alice, &ctx.xlm_id, &3_000, &s(&ctx.env, "more for alice"));
+    ctx.tip_client().tip(&supporter1, &alice, &ctx.xlm_id, &1_000, &s(&ctx.env, "for alice"));
+    ctx.tip_client().tip(&supporter1, &bob, &ctx.xlm_id, &2_000, &s(&ctx.env, "for bob"));
+    ctx.tip_client().tip(&supporter2, &alice, &ctx.xlm_id, &3_000, &s(&ctx.env, "more for alice"));
 
     assert_eq!(ctx.tip_client().get_balance(&alice, &ctx.xlm_id), 4_000);
     assert_eq!(ctx.tip_client().get_balance(&bob, &ctx.xlm_id), 2_000);
@@ -325,8 +325,7 @@ fn test_e2e_pagination() {
     for i in 0..10 {
         let sp = Address::generate(&ctx.env);
         ctx.sac(&ctx.xlm_id).mint(&sp, &100_000);
-        ctx.tip_client()
-            .tip(&sp, &creator, &ctx.xlm_id, &100, &s(&ctx.env, &format!("tip {}", i)));
+        ctx.tip_client().tip(&sp, &creator, &ctx.xlm_id, &100, &s(&ctx.env, &format!("tip {}", i)));
     }
 
     assert_eq!(ctx.tip_client().get_tip_count(&creator), 10);
