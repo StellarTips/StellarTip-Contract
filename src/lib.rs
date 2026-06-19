@@ -14,6 +14,8 @@ use soroban_sdk::{
 pub enum DataKey {
     /// Admin address with privileged access.
     Admin,
+    /// Pending admin address waiting to accept.
+    PendingAdmin,
     /// Pause flag for emergency stop.
     Paused,
     /// Platform fee in basis points (0–10_000).
@@ -79,6 +81,7 @@ mod error {
         NotAuthorized = 11,
         InvalidInput = 12,
         BalanceNotEmpty = 13,
+        NoPendingTransfer = 14,
     }
 }
 
@@ -135,6 +138,12 @@ const EVENT_FEE_CHANGED: Symbol = soroban_sdk::symbol_short!("FEEC");
 
 /// Emitted when the admin is changed.
 const EVENT_ADMIN_CHANGED: Symbol = soroban_sdk::symbol_short!("ADMC");
+
+/// Emitted when a pending admin is nominated.
+const EVENT_PENDING_ADMIN: Symbol = soroban_sdk::symbol_short!("PADM");
+
+/// Emitted when a pending admin transfer is cancelled.
+const EVENT_ADMIN_TRANSFER_CANCELLED: Symbol = soroban_sdk::symbol_short!("ADMCAN");
 
 /// Emitted when the fee recipient is changed.
 const EVENT_FEE_RECIPIENT_CHANGED: Symbol = soroban_sdk::symbol_short!("FERC");
@@ -216,7 +225,9 @@ impl TipContract {
     // Admin functions
     // -----------------------------------------------------------------------
 
-    /// Transfer admin privileges to a new address.
+    /// Nominate a new admin. The nominated address must call `accept_admin()`
+    /// to finalise the transfer.  The current admin can cancel at any time
+    /// before acceptance via `cancel_admin_transfer()`.
     pub fn set_admin(env: Env, caller: Address, new_admin: Address) {
         caller.require_auth();
         let current_admin: Address = env
@@ -227,9 +238,46 @@ impl TipContract {
         if caller != current_admin {
             panic_with_error!(env, TipError::NotAuthorized);
         }
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
         extend_instance_ttl(&env);
-        env.events().publish((EVENT_ADMIN_CHANGED, caller), new_admin);
+        env.events().publish((EVENT_PENDING_ADMIN, caller), new_admin);
+    }
+
+    /// Accept a pending admin nomination.  Only the nominated address can
+    /// call this function, which finalises the transfer.
+    pub fn accept_admin(env: Env, caller: Address) {
+        caller.require_auth();
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NoPendingTransfer));
+        if caller != pending_admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &caller);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_ADMIN_CHANGED, caller.clone()), caller);
+    }
+
+    /// Cancel a pending admin nomination.  Only the current admin can call.
+    pub fn cancel_admin_transfer(env: Env, caller: Address) {
+        caller.require_auth();
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != current_admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        if !env.storage().instance().has(&DataKey::PendingAdmin) {
+            panic_with_error!(env, TipError::NoPendingTransfer);
+        }
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_ADMIN_TRANSFER_CANCELLED, caller), ());
     }
 
     /// Pause the contract (emergency stop). Only admin can call.
@@ -638,6 +686,11 @@ impl TipContract {
     /// Return the admin address.
     pub fn get_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// Return the pending admin address, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     /// Return whether the contract is paused.
