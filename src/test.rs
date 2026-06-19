@@ -1,10 +1,10 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Events, Ledger, LedgerInfo},
     token,
     token::StellarAssetClient,
-    Address, Env, String, Symbol,
+    Address, Env, String, Symbol, TryIntoVal,
 };
 use token::Client as TokenClient;
 
@@ -147,6 +147,64 @@ fn test_init_sets_admin_and_fee() {
 fn test_init_twice_fails() {
     let t = TestEnv::new();
     t.tip_client().init(&t.admin, &t.fee_recipient, &0u32);
+}
+
+#[test]
+fn test_init_emits_event() {
+    // Use a dedicated env so we can inspect emitted events directly,
+    // independent of the shared TestEnv construction path.
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1000,
+        protocol_version: 22,
+        sequence_number: 100,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_persistent_entry_ttl: 10,
+        max_entry_ttl: 1_000_000,
+        min_temp_entry_ttl: 10,
+    });
+
+    let admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+    let contract_id = env.register(TipContract, ());
+    let client = crate::TipContractClient::new(&env, &contract_id);
+
+    // Non-default fee bps so the payload cannot accidentally be zero.
+    client.init(&admin, &fee_recipient, &500u32);
+
+    let events = env.events().all();
+    let expected_name = Symbol::new(&env, "INIT");
+
+    // Exactly one EVENT_INIT event should be published, with the admin as
+    // topic[1] and (fee_recipient, fee_bps = 500) as the payload.
+    let mut total: u32 = 0;
+    let mut init_event = None;
+    for event in &events {
+        let topics = &event.1;
+        if topics.len() < 2 {
+            continue;
+        }
+        if let Some(topic0) = topics.get(0) {
+            let sym: Symbol = topic0.try_into_val(&env).unwrap();
+            if sym == expected_name {
+                total += 1;
+                init_event = Some(event);
+            }
+        }
+    }
+    assert_eq!(total, 1, "expected exactly one EVENT_INIT, found {total}");
+
+    let event = init_event.unwrap();
+    assert_eq!(event.0, contract_id);
+
+    let topic_admin: Address = event.1.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_admin, admin);
+
+    let (payload_recipient, payload_bps): (Address, u32) = event.2.try_into_val(&env).unwrap();
+    assert_eq!(payload_recipient, fee_recipient);
+    assert_eq!(payload_bps, 500);
 }
 
 #[test]
@@ -683,6 +741,40 @@ fn test_tip_zero_amount_fails() {
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
 
     t.tip_client().tip(&bob, &alice, &t.token_id, &0, &s(&t.env, ""));
+}
+
+// Regression test for issue #28:
+// when `fee_bps > 0` is configured but `FeeRecipient` is unset in instance
+// storage, `tip()` must surface a clean `FeeRecipientNotSet` error rather
+// than an unrecoverable panic that would DoS tipping.
+#[test]
+#[should_panic(expected = "#14")]
+fn test_tip_with_fee_recipient_unset_fails() {
+    let t = TestEnv::new();
+
+    // Configure a non-zero fee (this normally requires the recipient to be
+    // set; we deliberately invalidate storage below to simulate a corrupted
+    // / missing recipient state).
+    t.tip_client().set_fee_percentage(&t.admin, &500u32);
+
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(
+        &alice,
+        &Symbol::new(&t.env, "alice"),
+        &s(&t.env, "Alice"),
+        &s(&t.env, ""),
+    );
+
+    // Remove the `FeeRecipient` key from the contract's instance storage to
+    // reproduce the failing precondition.
+    let contract_id = t.contract_id.clone();
+    t.env.as_contract(&contract_id, || {
+        t.env.storage().instance().remove(&crate::DataKey::FeeRecipient);
+    });
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
 }
 
 // ---------------------------------------------------------------------------
