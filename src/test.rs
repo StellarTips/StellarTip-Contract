@@ -1444,4 +1444,3 @@ fn test_unregister_after_withdrawing_all_many_tokens() {
     t.tip_client().unregister(&alice);
     assert!(!t.tip_client().is_creator(&alice));
 }
-}
