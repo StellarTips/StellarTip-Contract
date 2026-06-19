@@ -139,6 +139,9 @@ const EVENT_ADMIN_CHANGED: Symbol = soroban_sdk::symbol_short!("ADMC");
 /// Emitted when the fee recipient is changed.
 const EVENT_FEE_RECIPIENT_CHANGED: Symbol = soroban_sdk::symbol_short!("FERC");
 
+/// Emitted when the contract is initialized.
+const EVENT_INIT: Symbol = soroban_sdk::symbol_short!("INIT");
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -210,6 +213,7 @@ impl TipContract {
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
         extend_instance_ttl(&env);
+        env.events().publish((EVENT_INIT, caller), (fee_recipient, fee_bps));
     }
 
     // -----------------------------------------------------------------------
