@@ -816,3 +816,6 @@ impl TipContract {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;
