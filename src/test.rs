@@ -368,7 +368,7 @@ fn test_set_admin() {
 }
 
 #[test]
-#[should_panic(expected = "#14")]
+#[should_panic(expected = "#16")]
 fn test_accept_admin_without_pending_fails() {
     let t = TestEnv::new();
     let rando = Address::generate(&t.env);
@@ -413,7 +413,7 @@ fn test_cancel_admin_transfer_unauthorized_fails() {
 }
 
 #[test]
-#[should_panic(expected = "#14")]
+#[should_panic(expected = "#16")]
 fn test_cancel_admin_transfer_no_pending_fails() {
     let t = TestEnv::new();
     // No pending transfer to cancel.
