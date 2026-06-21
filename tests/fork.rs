@@ -111,7 +111,7 @@ fn test_e2e_register_tip_withdraw() {
     let creator = Address::generate(&ctx.env);
     let supporter = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
 
     ctx.tip_client().register(
         &creator,
@@ -157,7 +157,7 @@ fn test_e2e_multiple_tokens() {
     let creator = Address::generate(&ctx.env);
     let supporter = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
     ctx.tip_client().register(
         &creator,
         &Symbol::new(&ctx.env, "alice"),
@@ -204,7 +204,7 @@ fn test_e2e_with_fee() {
     let creator = Address::generate(&ctx.env);
     let supporter = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &500u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &500u32, &0u32, &0u32);
 
     ctx.tip_client().register(
         &creator,
@@ -232,7 +232,7 @@ fn test_e2e_multiple_creators() {
     let supporter1 = Address::generate(&ctx.env);
     let supporter2 = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
 
     ctx.tip_client().register(
         &alice,
@@ -275,7 +275,7 @@ fn test_fork_snapshot_roundtrip() {
     let creator = Address::generate(&ctx.env);
     let supporter = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
 
     ctx.tip_client().register(
         &creator,
@@ -314,7 +314,7 @@ fn test_e2e_pagination() {
     let ctx = setup_fork_env();
     let creator = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
     ctx.tip_client().register(
         &creator,
         &Symbol::new(&ctx.env, "paginator"),
@@ -344,7 +344,7 @@ fn test_e2e_register_unregister() {
     let ctx = setup_fork_env();
     let creator = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
     ctx.tip_client().register(
         &creator,
         &Symbol::new(&ctx.env, "lifecycle"),
@@ -372,7 +372,7 @@ fn test_e2e_update_profile() {
     let ctx = setup_fork_env();
     let creator = Address::generate(&ctx.env);
 
-    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32);
+    ctx.tip_client().init(&ctx.admin, &ctx.fee_recipient, &0u32, &0u32, &0u32);
     ctx.tip_client().register(
         &creator,
         &Symbol::new(&ctx.env, "updater"),
