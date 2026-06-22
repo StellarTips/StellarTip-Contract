@@ -51,7 +51,7 @@ impl FuzzEnv {
         sac.mint(&admin, &1_000_000_000_000_000_000); // large amount of tokens
 
         let t = FuzzEnv { env, contract_id, admin, fee_recipient, token_id };
-        t.tip_client().init(&t.admin, &t.fee_recipient, &fee_bps, &0u32, &0u32);
+        t.tip_client().init(&t.admin, &t.fee_recipient, &fee_bps, &0u32, &0u32, &0i128);
         t
     }
 
