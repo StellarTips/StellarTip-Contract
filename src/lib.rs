@@ -203,11 +203,10 @@ fn check_initialized_and_not_paused(env: &Env) {
     extend_instance_ttl(env);
 }
 
-/// Validate string length constraints.
-fn validate_input(env: &Env, _username: Option<Symbol>, display_name: &String, bio: &String) {
+/// Validate profile string length constraints.
+fn validate_input(env: &Env, display_name: &String, bio: &String) {
     // Username is a Symbol which is already limited by the Soroban SDK
     // to ScSymbol's max length (32 bytes), so we skip an explicit check here.
-    let _ = _username;
     if display_name.len() > MAX_DISPLAY_NAME_LEN {
         panic_with_error!(env, TipError::InvalidInput);
     }
@@ -418,7 +417,7 @@ impl TipContract {
     ) {
         caller.require_auth();
         check_initialized_and_not_paused(&env);
-        validate_input(&env, Some(username.clone()), &display_name, &bio);
+        validate_input(&env, &display_name, &bio);
 
         // Per-call checks first so the caller sees the most specific error
         // (e.g. `CreatorAlreadyExists`) before any global cap is consulted.
@@ -463,7 +462,7 @@ impl TipContract {
     pub fn update_profile(env: Env, caller: Address, display_name: String, bio: String) {
         caller.require_auth();
         check_initialized_and_not_paused(&env);
-        validate_input(&env, None, &display_name, &bio);
+        validate_input(&env, &display_name, &bio);
 
         let mut profile: CreatorProfile = env
             .storage()
