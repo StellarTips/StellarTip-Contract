@@ -22,6 +22,7 @@ transparency.
 - **Emergency Pause** – admin can pause and unpause the contract
 - **Events** – all actions emit standard Soroban events for indexing
 - **Persistent TTL** – automatic storage TTL extension prevents data loss
+- **CI Static Analysis** – Scout (Soroban-compatible) detects vulnerabilities in CI
 
 ## Contract Interface
 
@@ -124,7 +125,8 @@ make deploy-mainnet
 | `make test`       | Run all tests                      |
 | `make fmt`        | Format code with rustfmt           |
 | `make lint`       | Run clippy lints                   |
-| `make check`      | CI-style check (fmt + lint + test) |
+| `make scout`      | Run Scout static analysis          |
+| `make check`      | CI-style check (fmt + lint + scout + test + build) |
 | `make clean`      | Remove build artifacts             |
 | `make deploy-testnet` | Deploy to Stellar testnet      |
 | `make deploy-mainnet` | Deploy to Stellar mainnet      |
@@ -157,13 +159,18 @@ Tip flow:
 ## Project Structure
 
 ```
-├── Cargo.toml          # Rust / Soroban dependencies
+├── Cargo.toml                  # Rust / Soroban dependencies
 ├── src/
-│   ├── lib.rs          # Contract logic
-│   └── test.rs         # Unit tests (34 tests)
+│   ├── lib.rs                  # Contract logic
+│   └── test.rs                 # Unit tests (34 tests)
+├── docs/
+│   └── static-analysis-findings.md  # Known static analysis findings
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # CI pipeline (fmt, lint, test, build, static analysis)
 ├── .gitignore
 ├── scripts/
-│   └── deploy.sh       # Deployment script
+│   └── deploy.sh               # Deployment script
 ├── Makefile
 └── README.md
 ```
@@ -172,7 +179,7 @@ Tip flow:
 
 ![CI](https://github.com/StellarTips/StellarTip-Contract/actions/workflows/ci.yml/badge.svg)
 
-Automated CI runs tests, lints, format checks, and WASM builds on every push and pull request. Deployments are automated via GitHub Actions on version tags.
+Automated CI runs format checks, clippy lints, tests, WASM builds, and **Scout static analysis** on every push and pull request. Deployments are automated via GitHub Actions on version tags.
 
 ## License
 

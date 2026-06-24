@@ -8,58 +8,107 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: nightly
 
 jobs:
-  format:
-    name: Format Check
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy Lints
+    name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
-          targets: wasm32-unknown-unknown
+          target: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-clippy-
       - name: Run clippy
         run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
 
   test:
-    name: Tests
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          targets: wasm32-unknown-unknown
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          target: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-
       - name: Run tests
         run: cargo test
-      - name: Build for WASM
+
+  build:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          target: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-build-
+      - name: Build WASM
         run: cargo build --release --target wasm32-unknown-unknown
-      - name: Verify WASM artifact
-        run: |
-          wasm_file="target/wasm32-unknown-unknown/release/stellar_tip.wasm"
-          if [ -f "$wasm_file" ]; then
-            echo "WASM artifact created: $(ls -lh "$wasm_file" | awk '{print $5}')"
-          else
-            echo "ERROR: WASM artifact not found at $wasm_file"
-            exit 1
-          fi
-      - name: Optimize WASM
-        run: |
-          if command -v soroban &> /dev/null; then
-            soroban contract optimize \
-              --wasm target/wasm32-unknown-unknown/release/stellar_tip.wasm
-            echo "Optimized WASM size: $(ls -lh target/wasm32-unknown-unknown/release/stellar_tip.optimized.wasm | awk '{print $5}')"
-          else
-            echo "soroban CLI not installed; skipping WASM optimization"
-          fi
+
+  scout:
+    name: Static Analysis (Scout)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+      repository-projects: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Scout security analysis
+        uses: coinfabrik/scout-actions@v3
+        with:
+          working_directory: "."
+          fail_on_error: true
+          verbose: false
+      - name: Upload Scout report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scout-report
+          path: report.md
