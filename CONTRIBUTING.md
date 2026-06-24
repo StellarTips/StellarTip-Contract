@@ -38,6 +38,15 @@ make check
 4. Update the README if the public API has changed
 5. Submit a PR with a clear description following the PR template
 
+## Static Analysis
+
+We use **Scout** (by CoinFabrik) for Soroban-specific static analysis to detect common smart contract vulnerabilities. Scout runs as part of the CI pipeline.
+
+- Run `make scout` or `cargo scout-audit` locally to check for issues
+- The CI pipeline fails if Scout finds any new findings
+- Existing findings are documented in [`docs/static-analysis-findings.md`](docs/static-analysis-findings.md)
+- All findings must be resolved or explicitly acknowledged before merging
+
 ## Code Style
 
 - We use `rustfmt` with the `.rustfmt.toml` config in the repo root

@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt lint check wasm-build deploy-testnet deploy-mainnet
+.PHONY: build test clean fmt lint check scout wasm-build deploy-testnet deploy-mainnet
 
 build:
 	cargo build --release
@@ -15,7 +15,10 @@ fmt:
 lint:
 	cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
 
-check: fmt lint test wasm-build
+scout:
+	cargo scout-audit
+
+check: fmt lint scout test wasm-build
 	@echo "All checks passed!"
 
 clean:
