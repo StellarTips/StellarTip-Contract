@@ -207,7 +207,6 @@ fn check_initialized_and_not_paused(env: &Env) {
 fn validate_input(env: &Env, _username: Option<Symbol>, display_name: &String, bio: &String) {
     // Username is a Symbol which is already limited by the Soroban SDK
     // to ScSymbol's max length (32 bytes), so we skip an explicit check here.
-    let _ = _username;
     if display_name.len() > MAX_DISPLAY_NAME_LEN {
         panic_with_error!(env, TipError::InvalidInput);
     }
