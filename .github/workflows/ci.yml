@@ -15,9 +15,8 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt
@@ -28,22 +27,12 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
           target: wasm32-unknown-unknown
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-clippy-
       - name: Run clippy
         run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
 
@@ -51,21 +40,10 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
           target: wasm32-unknown-unknown
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-test-
       - name: Run tests
         run: cargo test
 

@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, token, Address, Env, String, Symbol,
-    Vec,
+    contract, contractimpl, contracttype, panic_with_error, token, Address, Env, Map, String,
+    Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,14 @@ pub enum DataKey {
     FeeBps,
     /// Address that receives platform fees.
     FeeRecipient,
+    /// Maximum number of creators that can register. `0` disables the limit.
+    MaxCreators,
+    /// Maximum number of tips per creator that will be recorded. `0`
+    /// disables the limit.
+    MaxTipsPerCreator,
+    /// Total number of currently-registered creators. Maintained alongside
+    /// `MaxCreators` for efficient cap enforcement.
+    CreatorCount,
     /// Creator profile keyed by the creator's `Address`.
     Profile(Address),
     /// Reverse lookup: `Symbol` (username) → `Address` (creator).
@@ -31,7 +39,10 @@ pub enum DataKey {
     TipCount(Address),
     /// Single tip record identified by `(creator Address, index)`.
     Tip(Address, u64),
-    /// List of tokens a creator has received tips in.
+    /// Set of tokens a creator has received tips in.
+    /// Stored as a `Map<Address, ()>` so that per-token membership checks,
+    /// inserts, and removals run in O(log n) instead of the O(n) linear
+    /// scan required by a `Vec<Address>`.
     CreatorTokens(Address),
 }
 
@@ -79,6 +90,12 @@ mod error {
         NotAuthorized = 11,
         InvalidInput = 12,
         BalanceNotEmpty = 13,
+        /// Raised when an admin-configured cap (`MaxCreators` or
+        /// `MaxTipsPerCreator`) has been reached.
+        CapExceeded = 14,
+        /// Returned when a non-zero `fee_bps` is configured but the
+        /// `FeeRecipient` storage key is missing (e.g. corrupted state).
+        FeeRecipientNotSet = 15,
     }
 }
 
@@ -89,7 +106,11 @@ use error::TipError;
 // ---------------------------------------------------------------------------
 
 /// Current contract version for client compatibility.
-pub const CONTRACT_VERSION: u32 = 1;
+///
+/// v2 introduces configurable creator and tip-history caps along with new
+/// admin/view functions and a new `init()` signature. Clients should use
+/// `get_contract_version()` to detect the deployed shape.
+pub const CONTRACT_VERSION: u32 = 2;
 
 /// Maximum platform fee in basis points (100% = 10_000 bps).
 const MAX_FEE_BPS: u32 = 10_000;
@@ -98,6 +119,15 @@ const MAX_FEE_BPS: u32 = 10_000;
 const MAX_DISPLAY_NAME_LEN: u32 = 64;
 /// Bio max length in bytes.
 const MAX_BIO_LEN: u32 = 256;
+
+/// Default cap on total registered creators when one isn't provided by the
+/// admin at initialization. Sized to give plenty of headroom for early growth
+/// while protecting against unbounded instance-storage bloat.
+pub const DEFAULT_MAX_CREATORS: u32 = 10_000;
+
+/// Default cap on tip history length per creator when one isn't provided.
+/// Bounds the per-creator persistent-storage footprint.
+pub const DEFAULT_MAX_TIPS_PER_CREATOR: u32 = 10_000;
 
 /// TTL threshold (ledgers) before extension is triggered.
 /// ~17_280 ledgers per day; 15 days.
@@ -138,6 +168,14 @@ const EVENT_ADMIN_CHANGED: Symbol = soroban_sdk::symbol_short!("ADMC");
 
 /// Emitted when the fee recipient is changed.
 const EVENT_FEE_RECIPIENT_CHANGED: Symbol = soroban_sdk::symbol_short!("FERC");
+
+/// Emitted when the admin-configured creator cap is updated.
+const EVENT_MAX_CREATORS_CHANGED: Symbol = soroban_sdk::symbol_short!("CAPMC");
+
+/// Emitted when the admin-configured per-creator tip cap is updated.
+const EVENT_MAX_TIPS_CHANGED: Symbol = soroban_sdk::symbol_short!("CAPMT");
+/// Emitted when the contract is initialized.
+const EVENT_INIT: Symbol = soroban_sdk::symbol_short!("INIT");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -191,13 +229,29 @@ impl TipContract {
     // Initialization
     // -----------------------------------------------------------------------
 
-    /// Initialize the contract with an admin, fee recipient, and platform fee.
+    /// Initialize the contract with an admin, fee recipient, platform fee,
+    /// and storage-bloat caps.
+    ///
+    /// `max_creators` and `max_tips_per_creator` are the hard caps enforced on
+    /// `register()` and `tip()` respectively. A value of `0` disables the
+    /// corresponding cap ("unlimited"). The defaults
+    /// [`DEFAULT_MAX_CREATORS`] and [`DEFAULT_MAX_TIPS_PER_CREATOR`] are
+    /// sensible starting points when no admin preference is known.
     ///
     /// # Arguments
     /// * `caller` – Address that becomes the admin (must authorize).
     /// * `fee_recipient` – Address that receives platform fees.
     /// * `fee_bps` – Platform fee in basis points (0–10_000).
-    pub fn init(env: Env, caller: Address, fee_recipient: Address, fee_bps: u32) {
+    /// * `max_creators` – Cap on total registered creators (`0` = unlimited).
+    /// * `max_tips_per_creator` – Cap on tip history per creator (`0` = unlimited).
+    pub fn init(
+        env: Env,
+        caller: Address,
+        fee_recipient: Address,
+        fee_bps: u32,
+        max_creators: u32,
+        max_tips_per_creator: u32,
+    ) {
         caller.require_auth();
         if env.storage().instance().has(&DataKey::Admin) {
             panic_with_error!(env, TipError::AlreadyInitialized);
@@ -209,7 +263,11 @@ impl TipContract {
         env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().set(&DataKey::MaxCreators, &max_creators);
+        env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips_per_creator);
+        env.storage().instance().set(&DataKey::CreatorCount, &0u32);
         extend_instance_ttl(&env);
+        env.events().publish((EVENT_INIT, caller), (fee_recipient, fee_bps));
     }
 
     // -----------------------------------------------------------------------
@@ -299,6 +357,48 @@ impl TipContract {
         env.events().publish((EVENT_FEE_RECIPIENT_CHANGED, caller), fee_recipient);
     }
 
+    /// Update the maximum number of creators that can register. A value of
+    /// `0` disables the cap (unlimited). Only admin can call.
+    ///
+    /// Lowering the cap below the current creator count does **not**
+    /// retroactively remove any creator; it only blocks new registrations
+    /// until the count drops (via `unregister`) back below the cap.
+    pub fn set_max_creators(env: Env, caller: Address, max_creators: u32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::MaxCreators, &max_creators);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_MAX_CREATORS_CHANGED, caller), max_creators);
+    }
+
+    /// Update the maximum number of tips recorded per creator. A value of
+    /// `0` disables the cap (unlimited). Only admin can call.
+    ///
+    /// Lowering the cap below the current tip count for any creator does
+    /// **not** delete historical tips; it only blocks new tips for that
+    /// creator until the admin raises the cap again.
+    pub fn set_max_tips_per_creator(env: Env, caller: Address, max_tips: u32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_MAX_TIPS_CHANGED, caller), max_tips);
+    }
+
     // -----------------------------------------------------------------------
     // Registration
     // -----------------------------------------------------------------------
@@ -320,14 +420,22 @@ impl TipContract {
         check_initialized_and_not_paused(&env);
         validate_input(&env, Some(username.clone()), &display_name, &bio);
 
+        // Per-call checks first so the caller sees the most specific error
+        // (e.g. `CreatorAlreadyExists`) before any global cap is consulted.
         // Each address can only register once.
         if env.storage().instance().has(&DataKey::Profile(caller.clone())) {
             panic_with_error!(env, TipError::CreatorAlreadyExists);
         }
-
         // Each username must be unique.
         if env.storage().instance().has(&DataKey::UsernameToAddress(username.clone())) {
             panic_with_error!(env, TipError::UsernameTaken);
+        }
+
+        // Enforce the global creator cap (skip if `MaxCreators == 0`).
+        let max_creators: u32 = env.storage().instance().get(&DataKey::MaxCreators).unwrap_or(0);
+        let creator_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
+        if max_creators > 0 && creator_count >= max_creators {
+            panic_with_error!(env, TipError::CapExceeded);
         }
 
         let profile = CreatorProfile {
@@ -342,6 +450,10 @@ impl TipContract {
         // TipCount moved to persistent storage for durability.
         env.storage().persistent().set(&DataKey::TipCount(caller.clone()), &0u64);
         extend_persistent_ttl(&env, &DataKey::TipCount(caller.clone()));
+
+        // Bump the global creator count last, after every other check has
+        // succeeded, so we never dirty it on a failed registration.
+        env.storage().instance().set(&DataKey::CreatorCount, &(creator_count + 1));
 
         env.events()
             .publish((EVENT_CREATOR_REGISTERED, caller), (profile.username, profile.registered_at));
@@ -384,8 +496,8 @@ impl TipContract {
 
         // Ensure all balances are zero.
         let tokens_key = DataKey::CreatorTokens(caller.clone());
-        if let Some(tokens) = env.storage().persistent().get::<_, Vec<Address>>(&tokens_key) {
-            for token in tokens.iter() {
+        if let Some(tokens) = env.storage().persistent().get::<_, Map<Address, ()>>(&tokens_key) {
+            for token in tokens.keys() {
                 let balance = env
                     .storage()
                     .persistent()
@@ -402,7 +514,11 @@ impl TipContract {
         env.storage().persistent().remove(&tip_count_key);
 
         env.storage().instance().remove(&DataKey::UsernameToAddress(profile.username));
-        env.storage().instance().remove(&DataKey::Profile(caller.clone()));
+        env.storage().instance().remove(&DataKey::Profile(caller.clone())); // Decrement the global creator count now that the profile is gone.
+        let current_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
+        if current_count > 0 {
+            env.storage().instance().set(&DataKey::CreatorCount, &(current_count - 1));
+        }
 
         env.events().publish((EVENT_CREATOR_UNREGISTERED, caller), ());
     }
@@ -438,9 +554,28 @@ impl TipContract {
             panic_with_error!(env, TipError::CreatorNotFound);
         }
 
+        // Enforce the per-creator tip-history cap. The `TipCount` value
+        // already lives in persistent storage, so we read it once and use
+        // it both for the cap check and as the new tip's index below.
+        let max_tips: u32 = env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0);
+        let tip_count_key = DataKey::TipCount(creator.clone());
+        let index: u64 = env.storage().persistent().get(&tip_count_key).unwrap_or(0);
+        if max_tips > 0 && index >= max_tips as u64 {
+            panic_with_error!(env, TipError::CapExceeded);
+        }
+
         let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         let fee = (amount * (fee_bps as i128)) / (MAX_FEE_BPS as i128);
         let creator_amount = amount - fee;
+
+        // Fail-fast: if a non-zero fee is configured but the fee recipient is
+        // not configured (corrupted / unset storage), abort before touching
+        // external token contracts.
+        let opt_fee_recipient: Option<Address> =
+            env.storage().instance().get(&DataKey::FeeRecipient);
+        if fee_bps > 0 && opt_fee_recipient.is_none() {
+            panic_with_error!(env, TipError::FeeRecipientNotSet);
+        }
 
         // 1. Transfer tokens from sender → this contract.
         let token_client = token::Client::new(&env, &token);
@@ -448,8 +583,12 @@ impl TipContract {
 
         // 2. Forward fee to recipient.
         if fee > 0 {
-            let fee_recipient: Address =
-                env.storage().instance().get(&DataKey::FeeRecipient).unwrap();
+            // Safe to unwrap: validated above when fee_bps > 0. Use
+            // `unwrap_or_else` defensively to surface a clean contract error
+            // rather than a raw panic if storage ever goes missing between
+            // the check and here.
+            let fee_recipient: Address = opt_fee_recipient
+                .unwrap_or_else(|| panic_with_error!(env, TipError::FeeRecipientNotSet));
             token_client.transfer(&env.current_contract_address(), &fee_recipient, &fee);
         }
 
@@ -459,19 +598,21 @@ impl TipContract {
         env.storage().persistent().set(&balance_key, &(current_balance + creator_amount));
         extend_persistent_ttl(&env, &balance_key);
 
-        // 4. Track token for creator.
+        // 4. Track token for creator. The token set is stored as a
+        //    `Map<Address, ()>` so membership checks and inserts run in
+        //    O(log n) regardless of how many tokens the creator already has.
         let tokens_key = DataKey::CreatorTokens(creator.clone());
-        let mut tokens: Vec<Address> =
-            env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Vec::new(&env));
-        if !tokens.contains(&token) {
-            tokens.push_back(token.clone());
+        let mut tokens: Map<Address, ()> =
+            env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+        if !tokens.contains_key(token.clone()) {
+            tokens.set(token.clone(), ());
             env.storage().persistent().set(&tokens_key, &tokens);
         }
         extend_persistent_ttl(&env, &tokens_key);
 
-        // 5. Record the tip.
-        let tip_count_key = DataKey::TipCount(creator.clone());
-        let index: u64 = env.storage().persistent().get(&tip_count_key).unwrap_or(0);
+        // 5. Record the tip. (Note: `index` and `tip_count_key` were read
+        // above so we can enforce the per-creator tip cap before any token
+        // transfer or storage write occurs.)
         let tip = Tip {
             from: from.clone(),
             token: token.clone(),
@@ -529,20 +670,12 @@ impl TipContract {
             extend_persistent_ttl(&env, &tokens_key);
         } else {
             env.storage().persistent().remove(&balance_key);
-            // Remove token from CreatorTokens when balance is fully withdrawn.
-            let mut tokens: Vec<Address> =
-                env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Vec::new(&env));
-            let mut pos = None;
-            for i in 0..tokens.len() {
-                if let Some(t) = tokens.get(i) {
-                    if t == token {
-                        pos = Some(i);
-                        break;
-                    }
-                }
-            }
-            if let Some(i) = pos {
-                tokens.remove(i);
+            // Remove the token from the creator's tracked token set in
+            // O(log n). The host-backed `Map` performs this lookup and
+            // removal directly without scanning every entry.
+            let mut tokens: Map<Address, ()> =
+                env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+            if tokens.remove(token.clone()).is_some() {
                 if tokens.is_empty() {
                     env.storage().persistent().remove(&tokens_key);
                 } else {
@@ -595,7 +728,6 @@ impl TipContract {
         for i in start..end {
             let key = DataKey::Tip(creator.clone(), i);
             if let Some(tip) = env.storage().persistent().get(&key) {
-                extend_persistent_ttl(&env, &key);
                 results.push_back(tip);
             }
         }
@@ -623,10 +755,14 @@ impl TipContract {
 
     /// Return the list of tokens a creator has received tips in.
     pub fn get_all_tokens(env: Env, creator: Address) -> Vec<Address> {
-        env.storage()
+        match env
+            .storage()
             .persistent()
-            .get(&DataKey::CreatorTokens(creator))
-            .unwrap_or_else(|| Vec::new(&env))
+            .get::<_, Map<Address, ()>>(&DataKey::CreatorTokens(creator))
+        {
+            Some(tokens) => tokens.keys(),
+            None => Vec::new(&env),
+        }
     }
 
     /// Return the contract version.
@@ -654,6 +790,24 @@ impl TipContract {
     pub fn get_fee_recipient(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::FeeRecipient)
     }
+
+    /// Return the configured creator cap. `0` means the cap is disabled
+    /// (unlimited registrations allowed).
+    pub fn get_max_creators(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::MaxCreators).unwrap_or(0)
+    }
+
+    /// Return the configured per-creator tip-history cap. `0` means the cap
+    /// is disabled (unlimited tips per creator).
+    pub fn get_max_tips_per_creator(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0)
+    }
+
+    /// Return the current count of registered creators. Tracked alongside
+    /// `MaxCreators` so cap enforcement is O(1).
+    pub fn get_creator_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -662,3 +816,6 @@ impl TipContract {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;

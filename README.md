@@ -30,12 +30,14 @@ transparency.
 
 | Function | Description |
 |----------|-------------|
-| `init(admin, fee_recipient, fee_bps)` | Initialize the contract (one-time) |
+| `init(admin, fee_recipient, fee_bps, max_creators, max_tips_per_creator)` | Initialize the contract (one-time). `max_creators` and `max_tips_per_creator` are optional caps — pass `0` for unlimited. |
 | `set_admin(caller, new_admin)` | Transfer admin privileges |
 | `pause(caller)` | Pause the contract (emergency stop) |
 | `unpause(caller)` | Unpause the contract |
 | `set_fee_percentage(caller, fee_bps)` | Set platform fee (0–10_000 bps) |
 | `set_fee_recipient(caller, address)` | Set the fee recipient address |
+| `set_max_creators(caller, max_creators)` | Update the creator cap (`0` = unlimited) |
+| `set_max_tips_per_creator(caller, max_tips)` | Update the per-creator tip-history cap (`0` = unlimited) |
 
 ### Creator Functions
 
@@ -71,6 +73,9 @@ transparency.
 | `is_paused()` | Check if the contract is paused |
 | `get_fee_percentage()` | Get current platform fee in bps |
 | `get_fee_recipient()` | Get the fee recipient address |
+| `get_max_creators()` | Get the configured creator cap (`0` = unlimited) |
+| `get_max_tips_per_creator()` | Get the configured per-creator tip cap (`0` = unlimited) |
+| `get_creator_count()` | Get the current number of registered creators |
 
 ## Getting Started
 
@@ -174,6 +179,34 @@ Tip flow:
 ├── Makefile
 └── README.md
 ```
+
+## Storage Caps (v2)
+
+To protect the contract against storage bloat and DoS-style \"dust\" attacks,
+admin-configurable caps are enforced on every `register()` and `tip()` call:
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_MAX_CREATORS` | `10_000` | Maximum number of registered creators |
+| `DEFAULT_MAX_TIPS_PER_CREATOR` | `10_000` | Maximum tip-history length per creator |
+
+- Pass `0` for either cap (in `init()` or the corresponding setter) to
+  disable the cap entirely ("unlimited").
+- When `MaxCreators` or `MaxTipsPerCreator` is reached, new calls fail with
+  `TipError::CapExceeded` (`#14`). Existing creators and tip history are
+  never retroactively evicted — lowering a cap only blocks future activity
+  until the admin raises it again (or `unregister()` frees a creator slot).
+- `CreatorCount` is tracked alongside `MaxCreators` so enforcement is O(1).
+
+`get_max_creators()`, `get_max_tips_per_creator()`, and `get_creator_count()`
+expose the current configuration.
+
+> **Migration note (v1 → v2):** `init()`'s signature was extended with
+> `max_creators` and `max_tips_per_creator`. Soroban contracts are
+> non-upgradable, so existing v1 deployments must redeploy using the v2
+> WASM. Once redeployed the previous profile/balance data is no longer
+> reachable through the v2 contract entrypoint; in practice this is fine
+> because v1 never shipped to mainnet.
 
 ## Project Status
 

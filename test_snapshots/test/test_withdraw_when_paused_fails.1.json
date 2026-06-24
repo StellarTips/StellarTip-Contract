@@ -66,6 +66,12 @@
                 },
                 {
                   "u32": 0
+                },
+                {
+                  "u32": 10000
+                },
+                {
+                  "u32": 10000
                 }
               ]
             }
@@ -433,9 +439,12 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "vec": [
+                  "map": [
                     {
-                      "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                      "key": {
+                        "address": "CDLDVFKHEZ2RVB3NG4UQA4VPD3TSHV6XMHXMHP2BSGCJ2IIWVTOHGDSG"
+                      },
+                      "val": "void"
                     }
                   ]
                 }
@@ -625,6 +634,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "CreatorCount"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "FeeBps"
                             }
                           ]
@@ -643,6 +664,30 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "MaxCreators"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 10000
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "MaxTipsPerCreator"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 10000
                         }
                       },
                       {
