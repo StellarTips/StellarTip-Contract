@@ -9,6 +9,12 @@ wasm-build:
 test:
 	cargo test
 
+test-fork:
+	cargo test --test fork
+
+test-all: test test-fork
+	@echo "All tests (unit + fork) passed!"
+
 fmt:
 	cargo fmt --all
 
@@ -29,3 +35,12 @@ deploy-testnet:
 
 deploy-mainnet:
 	./scripts/deploy.sh mainnet
+
+start-testnet:
+	./scripts/start-testnet.sh
+
+stop-testnet:
+	-docker stop stellar-tip-soroban 2>/dev/null; true
+
+capture-snapshot:
+	./scripts/capture-snapshot.sh

@@ -350,8 +350,74 @@ fn test_withdraw_when_paused_fails() {
 fn test_set_admin() {
     let t = TestEnv::new();
     let new_admin = Address::generate(&t.env);
+
+    // Step 1: current admin nominates new admin
     t.tip_client().set_admin(&t.admin, &new_admin);
-    assert_eq!(t.tip_client().get_admin(), Some(new_admin));
+    // Admin should not have changed yet — clone to avoid moves
+    let admin_addr = t.admin.clone();
+    assert_eq!(t.tip_client().get_admin(), Some(admin_addr));
+    // Pending admin should be set
+    let pending = new_admin.clone();
+    assert_eq!(t.tip_client().get_pending_admin(), Some(pending));
+
+    // Step 2: nominated admin accepts
+    t.tip_client().accept_admin(&new_admin);
+    let new_admin_addr = new_admin.clone();
+    assert_eq!(t.tip_client().get_admin(), Some(new_admin_addr));
+    assert_eq!(t.tip_client().get_pending_admin(), None);
+}
+
+#[test]
+#[should_panic(expected = "#16")]
+fn test_accept_admin_without_pending_fails() {
+    let t = TestEnv::new();
+    let rando = Address::generate(&t.env);
+    t.tip_client().accept_admin(&rando);
+}
+
+#[test]
+#[should_panic(expected = "#11")]
+fn test_accept_admin_unauthorized_fails() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+    let rando = Address::generate(&t.env);
+    t.tip_client().set_admin(&t.admin, &new_admin);
+    // Only the nominated address can accept.
+    t.tip_client().accept_admin(&rando);
+}
+
+#[test]
+fn test_cancel_admin_transfer() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+
+    t.tip_client().set_admin(&t.admin, &new_admin);
+    assert_eq!(t.tip_client().get_pending_admin(), Some(new_admin));
+
+    // Cancel the pending transfer.
+    t.tip_client().cancel_admin_transfer(&t.admin);
+    assert_eq!(t.tip_client().get_pending_admin(), None);
+    // Admin stays the same.
+    assert_eq!(t.tip_client().get_admin(), Some(t.admin));
+}
+
+#[test]
+#[should_panic(expected = "#11")]
+fn test_cancel_admin_transfer_unauthorized_fails() {
+    let t = TestEnv::new();
+    let new_admin = Address::generate(&t.env);
+    let rando = Address::generate(&t.env);
+    t.tip_client().set_admin(&t.admin, &new_admin);
+    // Only the current admin can cancel.
+    t.tip_client().cancel_admin_transfer(&rando);
+}
+
+#[test]
+#[should_panic(expected = "#16")]
+fn test_cancel_admin_transfer_no_pending_fails() {
+    let t = TestEnv::new();
+    // No pending transfer to cancel.
+    t.tip_client().cancel_admin_transfer(&t.admin);
 }
 
 #[test]
