@@ -71,6 +71,7 @@ impl TestEnv {
             &0u32,
             &crate::DEFAULT_MAX_CREATORS,
             &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+            &crate::DEFAULT_MIN_TIP_AMOUNT,
         );
 
         t
@@ -110,6 +111,7 @@ impl TestEnv {
             &fee_bps,
             &crate::DEFAULT_MAX_CREATORS,
             &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+            &crate::DEFAULT_MIN_TIP_AMOUNT,
         );
         t
     }
@@ -121,6 +123,13 @@ impl TestEnv {
         let t = Self::new_with_fee(fee_bps);
         t.tip_client().set_max_creators(&t.admin, &max_creators);
         t.tip_client().set_max_tips_per_creator(&t.admin, &max_tips);
+        t
+    }
+
+    /// Build a `TestEnv` with a custom minimum tip amount.
+    fn new_with_min_tip(min_tip: i128) -> Self {
+        let t = Self::new();
+        t.tip_client().set_min_tip_amount(&t.admin, &min_tip);
         t
     }
 
@@ -175,10 +184,11 @@ fn test_init_sets_admin_and_fee() {
     let fee_recipient = t.tip_client().get_fee_recipient().unwrap();
     assert!(fee_recipient == t.fee_recipient);
     assert_eq!(t.tip_client().get_fee_percentage(), 0);
-    assert_eq!(t.tip_client().get_contract_version(), 2);
+    assert_eq!(t.tip_client().get_contract_version(), 3);
     assert!(!t.tip_client().is_paused());
     assert_eq!(t.tip_client().get_max_creators(), crate::DEFAULT_MAX_CREATORS);
     assert_eq!(t.tip_client().get_max_tips_per_creator(), crate::DEFAULT_MAX_TIPS_PER_CREATOR);
+    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
     assert_eq!(t.tip_client().get_creator_count(), 0);
 }
 
@@ -192,6 +202,7 @@ fn test_init_twice_fails() {
         &0u32,
         &crate::DEFAULT_MAX_CREATORS,
         &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+        &crate::DEFAULT_MIN_TIP_AMOUNT,
     );
 }
 
@@ -219,7 +230,7 @@ fn test_init_emits_event() {
 
     // Non-default fee bps so the payload cannot accidentally be zero.
     // Use 0 for both caps (unlimited) since this test is about the init event.
-    client.init(&admin, &fee_recipient, &500u32, &0u32, &0u32);
+    client.init(&admin, &fee_recipient, &500u32, &0u32, &0u32, &crate::DEFAULT_MIN_TIP_AMOUNT);
 
     let events = env.events().all();
     let expected_name = Symbol::new(&env, "INIT");
@@ -269,6 +280,7 @@ fn test_init_fee_too_high_fails() {
         &10_001u32,
         &crate::DEFAULT_MAX_CREATORS,
         &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+        &crate::DEFAULT_MIN_TIP_AMOUNT,
     );
 }
 
@@ -957,7 +969,7 @@ fn test_init_persists_supplied_caps() {
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Custom caps (not the defaults) are written to storage on init.
-    client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32);
+    client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32, &crate::DEFAULT_MIN_TIP_AMOUNT);
     assert_eq!(client.get_max_creators(), 7);
     assert_eq!(client.get_max_tips_per_creator(), 4);
     assert_eq!(client.get_creator_count(), 0);
@@ -994,7 +1006,7 @@ fn test_init_supplied_caps_rejects_8th_creator() {
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Cap of 7, then fill, then attempt an 8th → CapExceeded.
-    client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32);
+    client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32, &crate::DEFAULT_MIN_TIP_AMOUNT);
     let cap_names: [&str; 7] = ["c7_0", "c7_1", "c7_2", "c7_3", "c7_4", "c7_5", "c7_6"];
     for name in cap_names.iter() {
         let creator = Address::generate(&env);
@@ -1024,8 +1036,8 @@ fn test_init_with_zero_caps_means_unlimited() {
     let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
 
-    // `0` = unlimited for both caps.
-    client.init(&admin, &fee_recipient, &0u32, &0u32, &0u32);
+    // `0` = unlimited for both caps; `0` also disables the minimum.
+    client.init(&admin, &fee_recipient, &0u32, &0u32, &0u32, &0i128);
     assert_eq!(client.get_max_creators(), 0);
     assert_eq!(client.get_max_tips_per_creator(), 0);
 
@@ -1443,4 +1455,132 @@ fn test_unregister_after_withdrawing_all_many_tokens() {
     // would panic with BalanceNotEmpty (#13).
     t.tip_client().unregister(&alice);
     assert!(!t.tip_client().is_creator(&alice));
+}
+
+// ---------------------------------------------------------------------------
+// Minimum tip amount tests (issue #42)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_min_tip_amount_default() {
+    let t = TestEnv::new();
+    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
+}
+
+#[test]
+#[should_panic(expected = "#16")]
+fn test_tip_below_minimum_fails() {
+    let t = TestEnv::new_with_min_tip(100);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    // amount 99 is one below the configured minimum of 100.
+    t.tip_client().tip(&bob, &alice, &t.token_id, &99, &s(&t.env, ""));
+}
+
+#[test]
+fn test_tip_at_minimum_succeeds() {
+    let t = TestEnv::new_with_min_tip(100);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    t.tip_client().tip(&bob, &alice, &t.token_id, &100, &s(&t.env, ""));
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 100);
+}
+
+#[test]
+fn test_tip_above_minimum_succeeds() {
+    let t = TestEnv::new_with_min_tip(100);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    t.tip_client().tip(&bob, &alice, &t.token_id, &101, &s(&t.env, ""));
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 101);
+}
+
+#[test]
+fn test_set_min_tip_amount_admin_authorized() {
+    let t = TestEnv::new();
+    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
+
+    // Admin can raise the minimum.
+    t.tip_client().set_min_tip_amount(&t.admin, &500i128);
+    assert_eq!(t.tip_client().get_min_tip_amount(), 500);
+
+    // Admin can lower it again.
+    t.tip_client().set_min_tip_amount(&t.admin, &10i128);
+    assert_eq!(t.tip_client().get_min_tip_amount(), 10);
+
+    // Admin can disable it with 0.
+    t.tip_client().set_min_tip_amount(&t.admin, &0i128);
+    assert_eq!(t.tip_client().get_min_tip_amount(), 0);
+}
+
+#[test]
+#[should_panic(expected = "#11")]
+fn test_set_min_tip_amount_unauthorized_fails() {
+    let t = TestEnv::new();
+    let rando = Address::generate(&t.env);
+    t.tip_client().set_min_tip_amount(&rando, &100i128);
+}
+
+#[test]
+fn test_min_tip_amount_zero_disables_check() {
+    // minimum of 0 means no minimum: any positive amount should be accepted.
+    let t = TestEnv::new_with_min_tip(0);
+    let alice = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+
+    let bob = Address::generate(&t.env);
+    t.stellar_client().mint(&bob, &10_000);
+    t.tip_client().tip(&bob, &alice, &t.token_id, &1, &s(&t.env, ""));
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 1);
+}
+
+#[test]
+#[should_panic(expected = "#12")]
+fn test_min_tip_amount_negative_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1000,
+        protocol_version: 22,
+        sequence_number: 100,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_persistent_entry_ttl: 10,
+        max_entry_ttl: 1_000_000,
+        min_temp_entry_ttl: 10,
+    });
+    let admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+    let contract_id = env.register(TipContract, ());
+    let client = crate::TipContractClient::new(&env, &contract_id);
+    client.init(
+        &admin,
+        &fee_recipient,
+        &0u32,
+        &crate::DEFAULT_MAX_CREATORS,
+        &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+        &-1i128,
+    );
+}
+
+#[test]
+#[should_panic(expected = "#12")]
+fn test_min_tip_amount_negative_setter_fails() {
+    let t = TestEnv::new();
+    t.tip_client().set_min_tip_amount(&t.admin, &-1i128);
+}
+
+#[test]
+fn test_contract_version_is_3() {
+    let t = TestEnv::new();
+    assert_eq!(t.tip_client().get_contract_version(), 3);
 }

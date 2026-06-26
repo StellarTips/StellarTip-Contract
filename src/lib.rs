@@ -25,6 +25,8 @@ pub enum DataKey {
     /// Maximum number of tips per creator that will be recorded. `0`
     /// disables the limit.
     MaxTipsPerCreator,
+    /// Minimum tip amount in token base units. `0` disables the minimum.
+    MinTipAmount,
     /// Total number of currently-registered creators. Maintained alongside
     /// `MaxCreators` for efficient cap enforcement.
     CreatorCount,
@@ -96,6 +98,9 @@ mod error {
         /// Returned when a non-zero `fee_bps` is configured but the
         /// `FeeRecipient` storage key is missing (e.g. corrupted state).
         FeeRecipientNotSet = 15,
+        /// Returned when `amount` is positive but below the configured
+        /// `MinTipAmount`.
+        BelowMinimum = 16,
     }
 }
 
@@ -107,10 +112,11 @@ use error::TipError;
 
 /// Current contract version for client compatibility.
 ///
-/// v2 introduces configurable creator and tip-history caps along with new
-/// admin/view functions and a new `init()` signature. Clients should use
-/// `get_contract_version()` to detect the deployed shape.
-pub const CONTRACT_VERSION: u32 = 2;
+/// v3 introduces a configurable minimum tip amount (`MinTipAmount`) to prevent
+/// dust attacks, along with `set_min_tip_amount()`, `get_min_tip_amount()`, and
+/// a new `init()` parameter. Clients should use `get_contract_version()` to
+/// detect the deployed shape.
+pub const CONTRACT_VERSION: u32 = 3;
 
 /// Maximum platform fee in basis points (100% = 10_000 bps).
 const MAX_FEE_BPS: u32 = 10_000;
@@ -128,6 +134,14 @@ pub const DEFAULT_MAX_CREATORS: u32 = 10_000;
 /// Default cap on tip history length per creator when one isn't provided.
 /// Bounds the per-creator persistent-storage footprint.
 pub const DEFAULT_MAX_TIPS_PER_CREATOR: u32 = 10_000;
+
+/// Default minimum tip amount in token base units.
+///
+/// A value of `1` is equivalent to the existing `amount > 0` guard and
+/// preserves all prior behaviour. This default provides no meaningful dust
+/// protection on its own — admins should raise it to a token-appropriate
+/// threshold after deployment.  `0` disables the minimum entirely.
+pub const DEFAULT_MIN_TIP_AMOUNT: i128 = 1;
 
 /// TTL threshold (ledgers) before extension is triggered.
 /// ~17_280 ledgers per day; 15 days.
@@ -174,6 +188,8 @@ const EVENT_MAX_CREATORS_CHANGED: Symbol = soroban_sdk::symbol_short!("CAPMC");
 
 /// Emitted when the admin-configured per-creator tip cap is updated.
 const EVENT_MAX_TIPS_CHANGED: Symbol = soroban_sdk::symbol_short!("CAPMT");
+/// Emitted when the admin-configured minimum tip amount is updated.
+const EVENT_MIN_TIP_CHANGED: Symbol = soroban_sdk::symbol_short!("MINTC");
 /// Emitted when the contract is initialized.
 const EVENT_INIT: Symbol = soroban_sdk::symbol_short!("INIT");
 
@@ -230,7 +246,7 @@ impl TipContract {
     // -----------------------------------------------------------------------
 
     /// Initialize the contract with an admin, fee recipient, platform fee,
-    /// and storage-bloat caps.
+    /// storage-bloat caps, and a minimum tip amount.
     ///
     /// `max_creators` and `max_tips_per_creator` are the hard caps enforced on
     /// `register()` and `tip()` respectively. A value of `0` disables the
@@ -238,12 +254,18 @@ impl TipContract {
     /// [`DEFAULT_MAX_CREATORS`] and [`DEFAULT_MAX_TIPS_PER_CREATOR`] are
     /// sensible starting points when no admin preference is known.
     ///
+    /// `min_tip_amount` is the minimum token amount accepted by `tip()`.
+    /// A value of `0` disables the minimum. [`DEFAULT_MIN_TIP_AMOUNT`] (= 1)
+    /// preserves prior behaviour; raise it post-deployment for meaningful dust
+    /// protection.
+    ///
     /// # Arguments
     /// * `caller` – Address that becomes the admin (must authorize).
     /// * `fee_recipient` – Address that receives platform fees.
     /// * `fee_bps` – Platform fee in basis points (0–10_000).
     /// * `max_creators` – Cap on total registered creators (`0` = unlimited).
     /// * `max_tips_per_creator` – Cap on tip history per creator (`0` = unlimited).
+    /// * `min_tip_amount` – Minimum tip in token base units (`0` = no minimum).
     pub fn init(
         env: Env,
         caller: Address,
@@ -251,6 +273,7 @@ impl TipContract {
         fee_bps: u32,
         max_creators: u32,
         max_tips_per_creator: u32,
+        min_tip_amount: i128,
     ) {
         caller.require_auth();
         if env.storage().instance().has(&DataKey::Admin) {
@@ -259,12 +282,16 @@ impl TipContract {
         if fee_bps > MAX_FEE_BPS {
             panic_with_error!(env, TipError::InvalidInput);
         }
+        if min_tip_amount < 0 {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
         env.storage().instance().set(&DataKey::Admin, &caller);
         env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::MaxCreators, &max_creators);
         env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips_per_creator);
+        env.storage().instance().set(&DataKey::MinTipAmount, &min_tip_amount);
         env.storage().instance().set(&DataKey::CreatorCount, &0u32);
         extend_instance_ttl(&env);
         env.events().publish((EVENT_INIT, caller), (fee_recipient, fee_bps));
@@ -397,6 +424,29 @@ impl TipContract {
         env.storage().instance().set(&DataKey::MaxTipsPerCreator, &max_tips);
         extend_instance_ttl(&env);
         env.events().publish((EVENT_MAX_TIPS_CHANGED, caller), max_tips);
+    }
+
+    /// Update the minimum tip amount in token base units. A value of `0`
+    /// disables the minimum entirely. Only admin can call.
+    ///
+    /// Raising the minimum does **not** affect existing tip records; it only
+    /// gates future calls to `tip()`.
+    pub fn set_min_tip_amount(env: Env, caller: Address, min_tip_amount: i128) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
+        if caller != admin {
+            panic_with_error!(env, TipError::NotAuthorized);
+        }
+        if min_tip_amount < 0 {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
+        env.storage().instance().set(&DataKey::MinTipAmount, &min_tip_amount);
+        extend_instance_ttl(&env);
+        env.events().publish((EVENT_MIN_TIP_CHANGED, caller), min_tip_amount);
     }
 
     // -----------------------------------------------------------------------
@@ -547,6 +597,12 @@ impl TipContract {
 
         if amount <= 0 {
             panic_with_error!(env, TipError::InvalidAmount);
+        }
+
+        let min_tip_amount: i128 =
+            env.storage().instance().get(&DataKey::MinTipAmount).unwrap_or(0);
+        if min_tip_amount > 0 && amount < min_tip_amount {
+            panic_with_error!(env, TipError::BelowMinimum);
         }
 
         // Verify the creator exists.
@@ -801,6 +857,12 @@ impl TipContract {
     /// is disabled (unlimited tips per creator).
     pub fn get_max_tips_per_creator(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0)
+    }
+
+    /// Return the configured minimum tip amount in token base units. `0` means
+    /// the minimum is disabled and any positive amount is accepted.
+    pub fn get_min_tip_amount(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::MinTipAmount).unwrap_or(0)
     }
 
     /// Return the current count of registered creators. Tracked alongside

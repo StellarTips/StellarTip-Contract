@@ -18,3 +18,8 @@ Thumbs.db
 # Environment
 .env
 .env.local
+CLAUDE.md
+plan.md
+
+# Fuzz test snapshots (auto-generated, partial runs)
+test_snapshots/fuzz/
