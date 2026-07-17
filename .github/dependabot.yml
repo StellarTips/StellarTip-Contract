@@ -1,31 +1,25 @@
-version: 2
-updates:
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "UTC"
-    labels:
-      - "dependencies"
-      - "rust"
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-    open-pull-requests-limit: 5
-    versioning-strategy: "auto"
+# Dependabot version updates are intentionally disabled on this repository.
+#
+# Rationale:
+#   1. Maintainers track Soroban SDK and GitHub Actions upgrades manually to
+#      keep deterministic builds and avoid churn against in-flight work.
+#   2. Previous automated bumps repeatedly opened PRs that were intentionally
+#      kept closed, so automation is paused until the project resumes upstream
+#      version-tracking practices.
+#
+# Note: An empty `updates: []` is the canonical Dependabot v2 form for
+# "config present but disabled" — Dependabot will parse this file, find no
+# ecosystems to monitor, and produce no PRs.
+#
+# To re-enable, either:
+#   • Restore the previous `Cargo` and `github-actions` blocks from git
+#     history (e.g. `git log -p -- .github/dependabot.yml`), OR
+#   • Toggle Dependabot version updates back on at:
+#       Settings → Code security and analysis → Dependabot version updates
+#     and add the ecosystems you want monitored below.
+#
+# Dependabot security alerts (for known CVEs) are managed independently in
+# repo settings and are not affected by this file.
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "UTC"
-    labels:
-      - "dependencies"
-      - "ci"
-    commit-message:
-      prefix: "chore(ci-deps)"
-      include: "scope"
+version: 2
+updates: []
