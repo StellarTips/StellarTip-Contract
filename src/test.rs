@@ -51,7 +51,7 @@ impl TestEnv {
 
         let admin = Address::generate(&env);
         let fee_recipient = Address::generate(&env);
-        let contract_id = env.register_contract(TipContract, ());
+        let contract_id = env.register_contract(None, TipContract);
 
         // Deploy a Stellar Asset Contract (token) using the modern API.
         let token_admin = Address::generate(&env);
@@ -94,7 +94,7 @@ impl TestEnv {
 
         let admin = Address::generate(&env);
         let fee_recipient = Address::generate(&env);
-        let contract_id = env.register_contract(TipContract, ());
+        let contract_id = env.register_contract(None, TipContract);
 
         let token_admin = Address::generate(&env);
         let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
@@ -225,7 +225,7 @@ fn test_init_emits_event() {
 
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Non-default fee bps so the payload cannot accidentally be zero.
@@ -272,7 +272,7 @@ fn test_init_fee_too_high_fails() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
     client.init(
         &admin,
@@ -965,7 +965,7 @@ fn test_init_persists_supplied_caps() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Custom caps (not the defaults) are written to storage on init.
@@ -1002,7 +1002,7 @@ fn test_init_supplied_caps_rejects_8th_creator() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Cap of 7, then fill, then attempt an 8th → CapExceeded.
@@ -1033,7 +1033,7 @@ fn test_init_with_zero_caps_means_unlimited() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // `0` = unlimited for both caps; `0` also disables the minimum.
@@ -1560,7 +1560,7 @@ fn test_min_tip_amount_negative_init_fails() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
     let client = crate::TipContractClient::new(&env, &contract_id);
     client.init(
         &admin,
