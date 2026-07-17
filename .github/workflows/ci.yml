@@ -46,15 +46,13 @@ jobs:
           target: wasm32-unknown-unknown
       # Workaround: ed25519-dalek 3.x breaks soroban-env-host testutils
       # (rand_core bump reshuffles CryptoRng). Cargo.lock is gitignored so
-      # every CI run fresh-resolves to the broken latest. Pin BOTH ambiguous
-      # lockfile entries (2.2.0 and 3.0.0) to 2.2.0 (latest pre-bump version
-      # satisfying soroban-sdk 21.7.7's `ed25519-dalek = "^2.1.1"` constraint).
-      # `|| true` keeps the step tolerant if one entry has already been
-      # unified away by cargo's resolver.
-      - name: Pin ed25519-dalek to 2.2.0 for testutils compatibility
+      # the resolver keeps drifting to the broken 3.x. Pin both ambiguous
+      # lockfile entries to 2.2.0 to satisfy soroban-sdk's `^2.1.1` while
+      # predating the 3.x trait reshuffle.
+      - name: Pin ed25519-dalek to 2.2.0
         run: |
-          cargo update -p ed25519-dalek@2.2.0 --precise 2.2.0 || true
-          cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0 || true
+          cargo update -p ed25519-dalek@2.2.0 --precise 2.2.0
+          cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0
       - name: Run tests
         run: cargo test
 
