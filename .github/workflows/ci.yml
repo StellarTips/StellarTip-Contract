@@ -44,6 +44,13 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-unknown-unknown
+      # Workaround: ed25519-dalek 3.x pulled transitively breaks soroban-env-host
+      # testutils' CryptoRng trait requirement. Cargo.lock is gitignored so
+      # every CI run fresh-resolves to the broken latest; pin to 1.0.1 (predates
+      # the trait snapshot) so testutils compiles. If 1.0.1 is yanked or rejected
+      # by the resolver, fallback to --precise 2.1.1.
+      - name: Pin ed25519-dalek to 1.0.1 for testutils compatibility
+        run: cargo update -p ed25519-dalek --precise 1.0.1
       - name: Run tests
         run: cargo test
 
