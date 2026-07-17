@@ -15,6 +15,12 @@ soroban-sdk = ">=22.0.0, <22.1"
 
 [dev-dependencies]
 soroban-sdk = { version = ">=22.0.0, <22.1", features = ["testutils"] }
+# Direct constraint on the transitive `soroban-env-host`. `Cargo.lock` is
+# gitignored in this repo so the resolver can re-grab the broken `22.1.x`
+# line on CI without this authoritative pin. Cargo unifies this boundary
+# into the normal dep graph, so it also caps the runtime graph even though
+# the failing build is only hit via `testutils`.
+soroban-env-host = ">=22.0.0, <22.1"
 proptest = "1.4.0"
 
 [profile.release]
