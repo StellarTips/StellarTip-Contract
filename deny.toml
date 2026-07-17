@@ -2,12 +2,16 @@
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
+ignore = [
+    "RUSTSEC-2024-0436", # paste crate is unmaintained but brought transitively by soroban core
+]
 
 [licenses]
 private = { ignore = true }
 allow = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception", # Required by wasmparser crates in Soroban
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
