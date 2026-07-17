@@ -12,7 +12,7 @@
 # ecosystems to monitor, and produce no PRs.
 #
 # To re-enable, either:
-#   • Restore the previous `Cargo` and `github-actions` blocks from git
+#   • Restore the previous `cargo` and `github-actions` blocks from git
 #     history (e.g. `git log -p -- .github/dependabot.yml`), OR
 #   • Toggle Dependabot version updates back on at:
 #       Settings → Code security and analysis → Dependabot version updates
