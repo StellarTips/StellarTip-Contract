@@ -2,7 +2,7 @@
 vulnerability = "deny"
 unmaintained = "all"
 unsound = "all"
-yanked = "all"
+yanked = "deny"
 
 [licenses]
 private = { ignore = true }
