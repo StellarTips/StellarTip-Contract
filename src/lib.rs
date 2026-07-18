@@ -73,7 +73,7 @@ pub struct Tip {
 // Errors
 // ---------------------------------------------------------------------------
 
-mod error {
+pub(crate) mod error {
     use soroban_sdk::contracterror;
 
     #[contracterror]
