@@ -194,8 +194,45 @@ const EVENT_MIN_TIP_CHANGED: Symbol = soroban_sdk::symbol_short!("MINTC");
 const EVENT_INIT: Symbol = soroban_sdk::symbol_short!("INIT");
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Storage Helpers
 // ---------------------------------------------------------------------------
+
+/// Read a value from instance storage, returning `Option<T>` to distinguish
+/// "key missing" from "key exists with zero/false value".
+fn get_instance<T: soroban_sdk::TryFromVal<soroban_sdk::Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+) -> Option<T> {
+    env.storage().instance().get(key)
+}
+
+/// Read a value from persistent storage, returning `Option<T>` to distinguish
+/// "key missing" from "key exists with zero value".
+fn get_persistent<T: soroban_sdk::TryFromVal<soroban_sdk::Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &DataKey,
+) -> Option<T> {
+    env.storage().persistent().get(key)
+}
+
+/// Read an i128 balance from persistent storage, returning `Option<i128>`.
+/// This distinguishes "key missing" (None) from "zero balance" (Some(0)).
+fn get_balance_opt(env: &Env, creator: &Address, token: &Address) -> Option<i128> {
+    get_persistent(env, &DataKey::Balance(creator.clone(), token.clone()))
+}
+
+/// Read a u64 tip count from persistent storage, returning `Option<u64>`.
+/// This distinguishes "key missing" (None) from "zero tips" (Some(0)).
+fn get_tip_count_opt(env: &Env, creator: &Address) -> Option<u64> {
+    get_persistent(env, &DataKey::TipCount(creator.clone()))
+}
+
+/// Read the paused flag from instance storage, returning `Option<bool>`.
+/// This distinguishes "key missing" (None) from "explicitly unpaused" (Some(false))
+/// and "explicitly paused" (Some(true)).
+fn get_paused_opt(env: &Env) -> Option<bool> {
+    get_instance(env, &DataKey::Paused)
+}
 
 /// Extend the TTL of the contract instance storage.
 fn extend_instance_ttl(env: &Env) {
@@ -208,11 +245,17 @@ fn extend_persistent_ttl(env: &Env, key: &DataKey) {
 }
 
 /// Verify the contract is initialized and not paused.
+/// Treats missing `Paused` key as "not paused" for backward compatibility,
+/// but callers can use `get_paused_opt` directly if they need to distinguish.
 fn check_initialized_and_not_paused(env: &Env) {
     if !env.storage().instance().has(&DataKey::Admin) {
         panic_with_error!(env, TipError::NotInitialized);
     }
-    let is_paused: bool = env.storage().instance().get(&DataKey::Paused).unwrap_or(false);
+    // Use get_paused_opt to explicitly handle the three states:
+    // - None: key missing (treat as not paused for backward compat)
+    // - Some(false): explicitly unpaused
+    // - Some(true): paused
+    let is_paused = get_paused_opt(env).unwrap_or(false);
     if is_paused {
         panic_with_error!(env, TipError::Paused);
     }
@@ -482,8 +525,9 @@ impl TipContract {
         }
 
         // Enforce the global creator cap (skip if `MaxCreators == 0`).
-        let max_creators: u32 = env.storage().instance().get(&DataKey::MaxCreators).unwrap_or(0);
-        let creator_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
+        // Use explicit Option handling to distinguish missing from zero.
+        let max_creators: u32 = get_instance(&env, &DataKey::MaxCreators).unwrap_or(0);
+        let creator_count: u32 = get_instance(&env, &DataKey::CreatorCount).unwrap_or(0);
         if max_creators > 0 && creator_count >= max_creators {
             panic_with_error!(env, TipError::CapExceeded);
         }
@@ -545,15 +589,16 @@ impl TipContract {
             .unwrap_or_else(|| panic_with_error!(env, TipError::CreatorNotFound));
 
         // Ensure all balances are zero.
+        // Use get_persistent with explicit Option handling to distinguish
+        // missing keys from zero balances.
         let tokens_key = DataKey::CreatorTokens(caller.clone());
-        if let Some(tokens) = env.storage().persistent().get::<_, Map<Address, ()>>(&tokens_key) {
+        if let Some(tokens) = get_persistent::<Map<Address, ()>>(&env, &tokens_key) {
             for token in tokens.keys() {
-                let balance = env
-                    .storage()
-                    .persistent()
-                    .get::<_, i128>(&DataKey::Balance(caller.clone(), token))
-                    .unwrap_or(0);
-                if balance > 0 {
+                let balance = get_balance_opt(&env, &caller, &token);
+                // balance.is_none() means key missing (never tipped in this token)
+                // balance == Some(0) means explicitly zero balance
+                // Both are acceptable for unregister; only Some(>0) is an error.
+                if balance.unwrap_or(0) > 0 {
                     panic_with_error!(env, TipError::BalanceNotEmpty);
                 }
             }
@@ -564,8 +609,9 @@ impl TipContract {
         env.storage().persistent().remove(&tip_count_key);
 
         env.storage().instance().remove(&DataKey::UsernameToAddress(profile.username));
-        env.storage().instance().remove(&DataKey::Profile(caller.clone())); // Decrement the global creator count now that the profile is gone.
-        let current_count: u32 = env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0);
+        env.storage().instance().remove(&DataKey::Profile(caller.clone()));
+        // Decrement the global creator count now that the profile is gone.
+        let current_count: u32 = get_instance(&env, &DataKey::CreatorCount).unwrap_or(0);
         if current_count > 0 {
             env.storage().instance().set(&DataKey::CreatorCount, &(current_count - 1));
         }
@@ -599,8 +645,9 @@ impl TipContract {
             panic_with_error!(env, TipError::InvalidAmount);
         }
 
-        let min_tip_amount: i128 =
-            env.storage().instance().get(&DataKey::MinTipAmount).unwrap_or(0);
+        // Use explicit Option handling for MinTipAmount to distinguish
+        // missing key (treat as 0) from explicitly set minimum.
+        let min_tip_amount: i128 = get_instance(&env, &DataKey::MinTipAmount).unwrap_or(0);
         if min_tip_amount > 0 && amount < min_tip_amount {
             panic_with_error!(env, TipError::BelowMinimum);
         }
@@ -613,22 +660,23 @@ impl TipContract {
         // Enforce the per-creator tip-history cap. The `TipCount` value
         // already lives in persistent storage, so we read it once and use
         // it both for the cap check and as the new tip's index below.
-        let max_tips: u32 = env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0);
+        // Use explicit Option handling to distinguish missing from zero.
+        let max_tips: u32 = get_instance(&env, &DataKey::MaxTipsPerCreator).unwrap_or(0);
         let tip_count_key = DataKey::TipCount(creator.clone());
-        let index: u64 = env.storage().persistent().get(&tip_count_key).unwrap_or(0);
+        let index: u64 = get_persistent(&env, &tip_count_key).unwrap_or(0);
         if max_tips > 0 && index >= max_tips as u64 {
             panic_with_error!(env, TipError::CapExceeded);
         }
 
-        let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        // Use explicit Option handling for FeeBps.
+        let fee_bps: u32 = get_instance(&env, &DataKey::FeeBps).unwrap_or(0);
         let fee = (amount * (fee_bps as i128)) / (MAX_FEE_BPS as i128);
         let creator_amount = amount - fee;
 
         // Fail-fast: if a non-zero fee is configured but the fee recipient is
         // not configured (corrupted / unset storage), abort before touching
         // external token contracts.
-        let opt_fee_recipient: Option<Address> =
-            env.storage().instance().get(&DataKey::FeeRecipient);
+        let opt_fee_recipient: Option<Address> = get_instance(&env, &DataKey::FeeRecipient);
         if fee_bps > 0 && opt_fee_recipient.is_none() {
             panic_with_error!(env, TipError::FeeRecipientNotSet);
         }
@@ -649,8 +697,9 @@ impl TipContract {
         }
 
         // 3. Credit the creator's internal balance.
+        // Use get_balance_opt to distinguish missing from zero.
         let balance_key = DataKey::Balance(creator.clone(), token.clone());
-        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0_i128);
+        let current_balance: i128 = get_balance_opt(&env, &creator, &token).unwrap_or(0);
         env.storage().persistent().set(&balance_key, &(current_balance + creator_amount));
         extend_persistent_ttl(&env, &balance_key);
 
@@ -659,7 +708,7 @@ impl TipContract {
         //    O(log n) regardless of how many tokens the creator already has.
         let tokens_key = DataKey::CreatorTokens(creator.clone());
         let mut tokens: Map<Address, ()> =
-            env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+            get_persistent(&env, &tokens_key).unwrap_or_else(|| Map::new(&env));
         if !tokens.contains_key(token.clone()) {
             tokens.set(token.clone(), ());
             env.storage().persistent().set(&tokens_key, &tokens);
@@ -707,7 +756,8 @@ impl TipContract {
         }
 
         let balance_key = DataKey::Balance(caller.clone(), token.clone());
-        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        // Use get_balance_opt to distinguish missing from zero.
+        let current_balance: i128 = get_balance_opt(&env, &caller, &token).unwrap_or(0);
 
         if current_balance < amount {
             panic_with_error!(env, TipError::InsufficientBalance);
@@ -730,7 +780,7 @@ impl TipContract {
             // O(log n). The host-backed `Map` performs this lookup and
             // removal directly without scanning every entry.
             let mut tokens: Map<Address, ()> =
-                env.storage().persistent().get(&tokens_key).unwrap_or_else(|| Map::new(&env));
+                get_persistent(&env, &tokens_key).unwrap_or_else(|| Map::new(&env));
             if tokens.remove(token.clone()).is_some() {
                 if tokens.is_empty() {
                     env.storage().persistent().remove(&tokens_key);
@@ -761,13 +811,16 @@ impl TipContract {
     }
 
     /// Return the current balance of a specific token held for a creator.
-    pub fn get_balance(env: Env, creator: Address, token: Address) -> i128 {
-        env.storage().persistent().get(&DataKey::Balance(creator, token)).unwrap_or(0)
+    /// Returns `None` if the balance key is missing (creator never received
+    /// tips in this token), `Some(0)` if explicitly zero, `Some(n)` for n > 0.
+    pub fn get_balance(env: Env, creator: Address, token: Address) -> Option<i128> {
+        get_balance_opt(&env, &creator, &token)
     }
 
     /// Return the total number of tips a creator has ever received.
-    pub fn get_tip_count(env: Env, creator: Address) -> u64 {
-        env.storage().persistent().get(&DataKey::TipCount(creator)).unwrap_or(0)
+    /// Returns `None` if the tip count key is missing, `Some(n)` otherwise.
+    pub fn get_tip_count(env: Env, creator: Address) -> Option<u64> {
+        get_tip_count_opt(&env, &creator)
     }
 
     /// Return a specific `Tip` record by its index.
@@ -778,8 +831,7 @@ impl TipContract {
     /// Return a paginated list of tips for a creator.
     pub fn get_tips(env: Env, creator: Address, start: u64, limit: u64) -> Vec<Tip> {
         let mut results = Vec::new(&env);
-        let count: u64 =
-            env.storage().persistent().get(&DataKey::TipCount(creator.clone())).unwrap_or(0);
+        let count: u64 = get_tip_count_opt(&env, &creator).unwrap_or(0);
         let end = (start + limit).min(count);
         for i in start..end {
             let key = DataKey::Tip(creator.clone(), i);
@@ -811,11 +863,7 @@ impl TipContract {
 
     /// Return the list of tokens a creator has received tips in.
     pub fn get_all_tokens(env: Env, creator: Address) -> Vec<Address> {
-        match env
-            .storage()
-            .persistent()
-            .get::<_, Map<Address, ()>>(&DataKey::CreatorTokens(creator))
-        {
+        match get_persistent::<Map<Address, ()>>(&env, &DataKey::CreatorTokens(creator)) {
             Some(tokens) => tokens.keys(),
             None => Vec::new(&env),
         }
@@ -832,14 +880,18 @@ impl TipContract {
         env.storage().instance().get(&DataKey::Admin)
     }
 
-    /// Return whether the contract is paused.
-    pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    /// Return the paused state.
+    /// Returns `None` if the `Paused` key is missing (contract not initialized
+    /// or corrupted state), `Some(false)` if explicitly unpaused,
+    /// `Some(true)` if explicitly paused.
+    pub fn is_paused(env: Env) -> Option<bool> {
+        get_paused_opt(&env)
     }
 
     /// Return the current platform fee in basis points.
-    pub fn get_fee_percentage(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+    /// Returns `None` if the key is missing, `Some(bps)` otherwise.
+    pub fn get_fee_percentage(env: Env) -> Option<u32> {
+        get_instance(&env, &DataKey::FeeBps)
     }
 
     /// Return the fee recipient address.
@@ -848,27 +900,29 @@ impl TipContract {
     }
 
     /// Return the configured creator cap. `0` means the cap is disabled
-    /// (unlimited registrations allowed).
-    pub fn get_max_creators(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::MaxCreators).unwrap_or(0)
+    /// (unlimited registrations allowed). Returns `None` if the key is missing.
+    pub fn get_max_creators(env: Env) -> Option<u32> {
+        get_instance(&env, &DataKey::MaxCreators)
     }
 
     /// Return the configured per-creator tip-history cap. `0` means the cap
-    /// is disabled (unlimited tips per creator).
-    pub fn get_max_tips_per_creator(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::MaxTipsPerCreator).unwrap_or(0)
+    /// is disabled (unlimited tips per creator). Returns `None` if the key is missing.
+    pub fn get_max_tips_per_creator(env: Env) -> Option<u32> {
+        get_instance(&env, &DataKey::MaxTipsPerCreator)
     }
 
     /// Return the configured minimum tip amount in token base units. `0` means
     /// the minimum is disabled and any positive amount is accepted.
-    pub fn get_min_tip_amount(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::MinTipAmount).unwrap_or(0)
+    /// Returns `None` if the key is missing.
+    pub fn get_min_tip_amount(env: Env) -> Option<i128> {
+        get_instance(&env, &DataKey::MinTipAmount)
     }
 
     /// Return the current count of registered creators. Tracked alongside
     /// `MaxCreators` so cap enforcement is O(1).
-    pub fn get_creator_count(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::CreatorCount).unwrap_or(0)
+    /// Returns `None` if the key is missing.
+    pub fn get_creator_count(env: Env) -> Option<u32> {
+        get_instance(&env, &DataKey::CreatorCount)
     }
 }
 

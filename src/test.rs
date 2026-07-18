@@ -51,7 +51,7 @@ impl TestEnv {
 
         let admin = Address::generate(&env);
         let fee_recipient = Address::generate(&env);
-        let contract_id = env.register_contract(None, TipContract);
+        let contract_id = env.register(TipContract, ());
 
         // Deploy a Stellar Asset Contract (token) using the modern API.
         let token_admin = Address::generate(&env);
@@ -94,7 +94,7 @@ impl TestEnv {
 
         let admin = Address::generate(&env);
         let fee_recipient = Address::generate(&env);
-        let contract_id = env.register_contract(None, TipContract);
+        let contract_id = env.register(TipContract, ());
 
         let token_admin = Address::generate(&env);
         let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
@@ -183,13 +183,13 @@ fn test_init_sets_admin_and_fee() {
     assert!(admin == t.admin);
     let fee_recipient = t.tip_client().get_fee_recipient().unwrap();
     assert!(fee_recipient == t.fee_recipient);
-    assert_eq!(t.tip_client().get_fee_percentage(), 0);
+    assert_eq!(t.tip_client().get_fee_percentage(), Some(0));
     assert_eq!(t.tip_client().get_contract_version(), 3);
-    assert!(!t.tip_client().is_paused());
-    assert_eq!(t.tip_client().get_max_creators(), crate::DEFAULT_MAX_CREATORS);
-    assert_eq!(t.tip_client().get_max_tips_per_creator(), crate::DEFAULT_MAX_TIPS_PER_CREATOR);
-    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
-    assert_eq!(t.tip_client().get_creator_count(), 0);
+    assert_eq!(t.tip_client().is_paused(), Some(false));
+    assert_eq!(t.tip_client().get_max_creators(), Some(crate::DEFAULT_MAX_CREATORS));
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), Some(crate::DEFAULT_MAX_TIPS_PER_CREATOR));
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(crate::DEFAULT_MIN_TIP_AMOUNT));
+    assert_eq!(t.tip_client().get_creator_count(), Some(0));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn test_init_emits_event() {
 
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Non-default fee bps so the payload cannot accidentally be zero.
@@ -272,7 +272,7 @@ fn test_init_fee_too_high_fails() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
     client.init(
         &admin,
@@ -292,9 +292,9 @@ fn test_init_fee_too_high_fails() {
 fn test_pause_and_unpause() {
     let t = TestEnv::new();
     t.tip_client().pause(&t.admin);
-    assert!(t.tip_client().is_paused());
+    assert_eq!(t.tip_client().is_paused(), Some(true));
     t.tip_client().unpause(&t.admin);
-    assert!(!t.tip_client().is_paused());
+    assert_eq!(t.tip_client().is_paused(), Some(false));
 }
 
 #[test]
@@ -370,7 +370,7 @@ fn test_set_admin() {
 fn test_set_fee_percentage() {
     let t = TestEnv::new();
     t.tip_client().set_fee_percentage(&t.admin, &500u32);
-    assert_eq!(t.tip_client().get_fee_percentage(), 500);
+    assert_eq!(t.tip_client().get_fee_percentage(), Some(500));
 }
 
 #[test]
@@ -550,7 +550,7 @@ fn test_unregister_removes_profile() {
     assert!(!t.tip_client().is_creator(&alice));
     assert!(!t.tip_client().is_username_taken(&Symbol::new(&t.env, "alice")));
     assert_eq!(t.tip_client().get_profile(&alice), None);
-    assert_eq!(t.tip_client().get_tip_count(&alice), 0);
+    assert_eq!(t.tip_client().get_tip_count(&alice), Some(0));
 }
 
 #[test]
@@ -584,7 +584,7 @@ fn test_unregister_after_full_withdraw() {
     t.stellar_client().mint(&bob, &10_000);
     t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
     t.tip_client().withdraw(&alice, &t.token_id, &1_000);
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 0);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(0));
     assert_eq!(t.tip_client().get_all_tokens(&alice).len(), 0);
     t.tip_client().unregister(&alice);
     assert!(!t.tip_client().is_creator(&alice));
@@ -618,7 +618,7 @@ fn test_tip_transfers_tokens() {
     assert_eq!(t.token_client().balance(&t.contract_id), contract_balance_before + 500);
 
     let balance = t.tip_client().get_balance(&alice, &t.token_id);
-    assert_eq!(balance, 500);
+    assert_eq!(balance, Some(500));
 
     let tokens = t.tip_client().get_all_tokens(&alice);
     assert_eq!(tokens.len(), 1);
@@ -643,7 +643,7 @@ fn test_tip_with_fee() {
     t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
 
     // Creator gets 950 (1000 - 5% fee = 50)
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 950);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(950));
 
     // Fee recipient gets 50
     assert_eq!(t.token_client().balance(&t.fee_recipient), 50);
@@ -667,7 +667,7 @@ fn test_tip_records_history() {
     let index = t.tip_client().tip(&bob, &alice, &t.token_id, &300, &s(&t.env, "💜"));
 
     assert_eq!(index, 0);
-    assert_eq!(t.tip_client().get_tip_count(&alice), 1);
+    assert_eq!(t.tip_client().get_tip_count(&alice), Some(1));
 
     let tip = t.tip_client().get_tip(&alice, &0).unwrap();
     assert_eq!(tip.from, bob);
@@ -681,7 +681,7 @@ fn test_tip_records_history() {
 
     let index2 = t.tip_client().tip(&charlie, &alice, &t.token_id, &200, &s(&t.env, ""));
     assert_eq!(index2, 1);
-    assert_eq!(t.tip_client().get_tip_count(&alice), 2);
+    assert_eq!(t.tip_client().get_tip_count(&alice), Some(2));
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn test_get_tips_pagination() {
         t.tip_client().tip(&supporter, &alice, &t.token_id, &100, &s(&t.env, "tip"));
     }
 
-    assert_eq!(t.tip_client().get_tip_count(&alice), 5);
+    assert_eq!(t.tip_client().get_tip_count(&alice), Some(5));
 
     let page1 = t.tip_client().get_tips(&alice, &0, &2);
     assert_eq!(page1.len(), 2);
@@ -802,7 +802,7 @@ fn test_withdraw_transfers_tokens_to_creator() {
 
     assert_eq!(t.token_client().balance(&alice), alice_balance_before + 400);
 
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 600);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(600));
 }
 
 #[test]
@@ -822,7 +822,7 @@ fn test_withdraw_full_balance() {
     t.tip_client().tip(&bob, &alice, &t.token_id, &777, &s(&t.env, ""));
 
     t.tip_client().withdraw(&alice, &t.token_id, &777);
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 0);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(0));
     let tokens = t.tip_client().get_all_tokens(&alice);
     assert_eq!(tokens.len(), 0);
 }
@@ -901,16 +901,16 @@ fn test_multiple_token_balances() {
 
     t.tip_client().tip(&bob, &alice, &token2_id, &500, &s(&t.env, ""));
 
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 1_000);
-    assert_eq!(t.tip_client().get_balance(&alice, &token2_id), 500);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(1_000));
+    assert_eq!(t.tip_client().get_balance(&alice, &token2_id), Some(500));
 
     let tokens = t.tip_client().get_all_tokens(&alice);
     assert!(tokens.contains(&t.token_id));
     assert!(tokens.contains(&token2_id));
 
     t.tip_client().withdraw(&alice, &token2_id, &200);
-    assert_eq!(t.tip_client().get_balance(&alice, &token2_id), 300);
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 1_000);
+    assert_eq!(t.tip_client().get_balance(&alice, &token2_id), Some(300));
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(1_000));
 
     let tokens_after = t.tip_client().get_all_tokens(&alice);
     assert!(tokens_after.contains(&token2_id));
@@ -965,14 +965,14 @@ fn test_init_persists_supplied_caps() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Custom caps (not the defaults) are written to storage on init.
     client.init(&admin, &fee_recipient, &0u32, &7u32, &4u32, &crate::DEFAULT_MIN_TIP_AMOUNT);
-    assert_eq!(client.get_max_creators(), 7);
-    assert_eq!(client.get_max_tips_per_creator(), 4);
-    assert_eq!(client.get_creator_count(), 0);
+    assert_eq!(client.get_max_creators(), Some(7));
+    assert_eq!(client.get_max_tips_per_creator(), Some(4));
+    assert_eq!(client.get_creator_count(), Some(0));
 
     // The 7-creator cap is enforced exactly as supplied. The 8th
     // registration is asserted separately in
@@ -982,7 +982,7 @@ fn test_init_persists_supplied_caps() {
         let creator = Address::generate(&env);
         client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
     }
-    assert_eq!(client.get_creator_count(), 7);
+    assert_eq!(client.get_creator_count(), Some(7));
 }
 
 #[test]
@@ -1002,7 +1002,7 @@ fn test_init_supplied_caps_rejects_8th_creator() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // Cap of 7, then fill, then attempt an 8th → CapExceeded.
@@ -1012,7 +1012,7 @@ fn test_init_supplied_caps_rejects_8th_creator() {
         let creator = Address::generate(&env);
         client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
     }
-    assert_eq!(client.get_creator_count(), 7);
+    assert_eq!(client.get_creator_count(), Some(7));
     let extra = Address::generate(&env);
     client.register(&extra, &Symbol::new(&env, "overflow"), &s(&env, "X"), &s(&env, ""));
 }
@@ -1033,13 +1033,13 @@ fn test_init_with_zero_caps_means_unlimited() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
 
     // `0` = unlimited for both caps; `0` also disables the minimum.
     client.init(&admin, &fee_recipient, &0u32, &0u32, &0u32, &0i128);
-    assert_eq!(client.get_max_creators(), 0);
-    assert_eq!(client.get_max_tips_per_creator(), 0);
+    assert_eq!(client.get_max_creators(), Some(0));
+    assert_eq!(client.get_max_tips_per_creator(), Some(0));
 
     // Registering more than DEFAULT_MAX_CREATORS should be fine.
     let names: [&str; 12] = [
@@ -1060,21 +1060,21 @@ fn test_init_with_zero_caps_means_unlimited() {
         let creator = Address::generate(&env);
         client.register(&creator, &Symbol::new(&env, name), &s(&env, "Name"), &s(&env, ""));
     }
-    assert_eq!(client.get_creator_count(), 12);
+    assert_eq!(client.get_creator_count(), Some(12));
 }
 
 #[test]
 #[should_panic(expected = "#14")]
 fn test_register_fails_when_creator_cap_reached() {
     let t = TestEnv::new_with_caps(0, 2, 0);
-    assert_eq!(t.tip_client().get_max_creators(), 2);
-    assert_eq!(t.tip_client().get_creator_count(), 0);
+    assert_eq!(t.tip_client().get_max_creators(), Some(2));
+    assert_eq!(t.tip_client().get_creator_count(), Some(0));
 
     let alice = Address::generate(&t.env);
     let bob = Address::generate(&t.env);
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
     t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_creator_count(), 2);
+    assert_eq!(t.tip_client().get_creator_count(), Some(2));
 
     let charlie = Address::generate(&t.env);
     t.tip_client().register(
@@ -1103,20 +1103,20 @@ fn test_unregister_frees_creator_slot_for_reuse() {
 
     let alice = Address::generate(&t.env);
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_creator_count(), 1);
+    assert_eq!(t.tip_client().get_creator_count(), Some(1));
 
     t.tip_client().unregister(&alice);
-    assert_eq!(t.tip_client().get_creator_count(), 0);
+    assert_eq!(t.tip_client().get_creator_count(), Some(0));
 
     let bob = Address::generate(&t.env);
     t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_creator_count(), 1);
+    assert_eq!(t.tip_client().get_creator_count(), Some(1));
 }
 
 #[test]
 fn test_creator_count_tracks_register_and_unregister() {
     let t = TestEnv::new();
-    assert_eq!(t.tip_client().get_creator_count(), 0);
+    assert_eq!(t.tip_client().get_creator_count(), Some(0));
 
     let a0 = Address::generate(&t.env);
     let a1 = Address::generate(&t.env);
@@ -1133,13 +1133,13 @@ fn test_creator_count_tracks_register_and_unregister() {
             &s(&t.env, ""),
         );
     }
-    assert_eq!(t.tip_client().get_creator_count(), 5);
+    assert_eq!(t.tip_client().get_creator_count(), Some(5));
 
     t.tip_client().unregister(&a0);
-    assert_eq!(t.tip_client().get_creator_count(), 4);
+    assert_eq!(t.tip_client().get_creator_count(), Some(4));
     t.tip_client().unregister(&a2);
     t.tip_client().unregister(&a4);
-    assert_eq!(t.tip_client().get_creator_count(), 2);
+    assert_eq!(t.tip_client().get_creator_count(), Some(2));
     assert!(t.tip_client().is_creator(&a1));
     assert!(t.tip_client().is_creator(&a3));
 }
@@ -1166,15 +1166,15 @@ fn test_tip_fails_when_tip_cap_reached() {
 fn test_set_max_creators_admin_authorized() {
     let t = TestEnv::new();
     // Initial defaults.
-    assert_eq!(t.tip_client().get_max_creators(), crate::DEFAULT_MAX_CREATORS);
+    assert_eq!(t.tip_client().get_max_creators(), Some(crate::DEFAULT_MAX_CREATORS));
 
     // Admin can lower the cap.
     t.tip_client().set_max_creators(&t.admin, &500u32);
-    assert_eq!(t.tip_client().get_max_creators(), 500);
+    assert_eq!(t.tip_client().get_max_creators(), Some(500));
 
     // Admin can disable the cap with 0.
     t.tip_client().set_max_creators(&t.admin, &0u32);
-    assert_eq!(t.tip_client().get_max_creators(), 0);
+    assert_eq!(t.tip_client().get_max_creators(), Some(0));
 }
 
 #[test]
@@ -1188,13 +1188,13 @@ fn test_set_max_creators_unauthorized_fails() {
 #[test]
 fn test_set_max_tips_per_creator_admin_authorized() {
     let t = TestEnv::new();
-    assert_eq!(t.tip_client().get_max_tips_per_creator(), crate::DEFAULT_MAX_TIPS_PER_CREATOR);
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), Some(crate::DEFAULT_MAX_TIPS_PER_CREATOR));
 
     t.tip_client().set_max_tips_per_creator(&t.admin, &250u32);
-    assert_eq!(t.tip_client().get_max_tips_per_creator(), 250);
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), Some(250));
 
     t.tip_client().set_max_tips_per_creator(&t.admin, &0u32);
-    assert_eq!(t.tip_client().get_max_tips_per_creator(), 0);
+    assert_eq!(t.tip_client().get_max_tips_per_creator(), Some(0));
 }
 
 #[test]
@@ -1213,11 +1213,11 @@ fn test_lowering_creator_cap_keeps_existing_creators_active() {
     t.tip_client().register(&alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
     let bob = Address::generate(&t.env);
     t.tip_client().register(&bob, &Symbol::new(&t.env, "bob"), &s(&t.env, "B"), &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_creator_count(), 2);
+    assert_eq!(t.tip_client().get_creator_count(), Some(2));
 
     // Admin lowers the creator cap below the current count.
     t.tip_client().set_max_creators(&t.admin, &1u32);
-    assert_eq!(t.tip_client().get_max_creators(), 1);
+    assert_eq!(t.tip_client().get_max_creators(), Some(1));
 
     // Existing creators can still operate normally.
     assert!(t.tip_client().is_creator(&alice));
@@ -1225,7 +1225,7 @@ fn test_lowering_creator_cap_keeps_existing_creators_active() {
     let supporter = Address::generate(&t.env);
     t.stellar_client().mint(&supporter, &10_000);
     t.tip_client().tip(&supporter, &alice, &t.token_id, &50, &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 50);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(50));
 }
 
 #[test]
@@ -1270,7 +1270,7 @@ fn test_raising_creator_cap_restores_capacity() {
         &s(&t.env, "C"),
         &s(&t.env, ""),
     );
-    assert_eq!(t.tip_client().get_creator_count(), 3);
+    assert_eq!(t.tip_client().get_creator_count(), Some(3));
 }
 
 #[test]
@@ -1305,7 +1305,7 @@ fn test_lowering_tip_cap_preserves_existing_history() {
         t.stellar_client().mint(&supporter, &10_000);
         t.tip_client().tip(&supporter, &alice, &t.token_id, &10, &s(&t.env, ""));
     }
-    assert_eq!(t.tip_client().get_tip_count(&alice), 5);
+    assert_eq!(t.tip_client().get_tip_count(&alice), Some(5));
 
     // Lower the cap; no new tips are recorded but the 5 historical entries
     // are still readable.
@@ -1364,7 +1364,7 @@ fn test_withdraw_many_tokens_full_withdraw_clears_set() {
     for i in 0..N {
         let token = token_addrs.get(i).unwrap();
         assert!(tracked.contains(&token), "tokens seeded should be tracked by the contract");
-        assert_eq!(t.tip_client().get_balance(&alice, &token), 1_000);
+        assert_eq!(t.tip_client().get_balance(&alice, &token), Some(1_000));
     }
 
     // Withdraw in non-sequential order so the map-backed removal is
@@ -1377,7 +1377,7 @@ fn test_withdraw_many_tokens_full_withdraw_clears_set() {
         // Removed token: gone from the tracked set and zero-balanced.
         let remaining = t.tip_client().get_all_tokens(&alice);
         assert!(!remaining.contains(&token), "token #{i} should be removed after full withdraw");
-        assert_eq!(t.tip_client().get_balance(&alice, &token), 0);
+        assert_eq!(t.tip_client().get_balance(&alice, &token), Some(0));
     }
 
     // After withdrawing every token fully, the tracked set is empty and the
@@ -1416,7 +1416,7 @@ fn test_withdraw_many_tokens_partial_keeps_remaining() {
     for i in 0..N {
         let token = token_addrs.get(i).unwrap();
         let expected = if i == PARTIAL_IDX { 1_000 - PARTIAL_AMOUNT } else { 1_000 };
-        assert_eq!(t.tip_client().get_balance(&alice, &token), expected);
+        assert_eq!(t.tip_client().get_balance(&alice, &token), Some(expected));
         assert!(
             tracked.contains(&token),
             "partial withdraw must not remove token #{i} from the set"
@@ -1464,7 +1464,7 @@ fn test_unregister_after_withdrawing_all_many_tokens() {
 #[test]
 fn test_min_tip_amount_default() {
     let t = TestEnv::new();
-    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(crate::DEFAULT_MIN_TIP_AMOUNT));
 }
 
 #[test]
@@ -1489,7 +1489,7 @@ fn test_tip_at_minimum_succeeds() {
     let bob = Address::generate(&t.env);
     t.stellar_client().mint(&bob, &10_000);
     t.tip_client().tip(&bob, &alice, &t.token_id, &100, &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 100);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(100));
 }
 
 #[test]
@@ -1501,25 +1501,25 @@ fn test_tip_above_minimum_succeeds() {
     let bob = Address::generate(&t.env);
     t.stellar_client().mint(&bob, &10_000);
     t.tip_client().tip(&bob, &alice, &t.token_id, &101, &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 101);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(101));
 }
 
 #[test]
 fn test_set_min_tip_amount_admin_authorized() {
     let t = TestEnv::new();
-    assert_eq!(t.tip_client().get_min_tip_amount(), crate::DEFAULT_MIN_TIP_AMOUNT);
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(crate::DEFAULT_MIN_TIP_AMOUNT));
 
     // Admin can raise the minimum.
     t.tip_client().set_min_tip_amount(&t.admin, &500i128);
-    assert_eq!(t.tip_client().get_min_tip_amount(), 500);
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(500));
 
     // Admin can lower it again.
     t.tip_client().set_min_tip_amount(&t.admin, &10i128);
-    assert_eq!(t.tip_client().get_min_tip_amount(), 10);
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(10));
 
     // Admin can disable it with 0.
     t.tip_client().set_min_tip_amount(&t.admin, &0i128);
-    assert_eq!(t.tip_client().get_min_tip_amount(), 0);
+    assert_eq!(t.tip_client().get_min_tip_amount(), Some(0));
 }
 
 #[test]
@@ -1540,7 +1540,7 @@ fn test_min_tip_amount_zero_disables_check() {
     let bob = Address::generate(&t.env);
     t.stellar_client().mint(&bob, &10_000);
     t.tip_client().tip(&bob, &alice, &t.token_id, &1, &s(&t.env, ""));
-    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), 1);
+    assert_eq!(t.tip_client().get_balance(&alice, &t.token_id), Some(1));
 }
 
 #[test]
@@ -1560,7 +1560,7 @@ fn test_min_tip_amount_negative_init_fails() {
     });
     let admin = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
-    let contract_id = env.register_contract(None, TipContract);
+    let contract_id = env.register(TipContract, ());
     let client = crate::TipContractClient::new(&env, &contract_id);
     client.init(
         &admin,
