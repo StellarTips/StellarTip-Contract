@@ -9,6 +9,7 @@ use soroban_sdk::{
 use token::Client as TokenClient;
 
 use crate::TipContract;
+use crate::error::TipError;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1583,4 +1584,137 @@ fn test_min_tip_amount_negative_setter_fails() {
 fn test_contract_version_is_3() {
     let t = TestEnv::new();
     assert_eq!(t.tip_client().get_contract_version(), 3);
+}
+
+// ---------------------------------------------------------------------------
+// Table-driven error-variant tests
+// ---------------------------------------------------------------------------
+
+fn extract_error<T, E>(
+    r: Result<Result<T, E>, Result<soroban_sdk::Error, soroban_sdk::InvokeError>>,
+) -> crate::error::TipError {
+    match r {
+        Err(Ok(err)) => err.try_into().unwrap(),
+        _ => panic!("expected contract error"),
+    }
+}
+
+fn case_already_initialized() -> TipError {
+    let t = TestEnv::new();
+    extract_error(t.tip_client().try_init(
+        &t.admin, &t.fee_recipient, &0u32,
+        &crate::DEFAULT_MAX_CREATORS, &crate::DEFAULT_MAX_TIPS_PER_CREATOR, &crate::DEFAULT_MIN_TIP_AMOUNT,
+    ))
+}
+
+fn case_not_initialized() -> TipError {
+    let env: Env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, TipContract);
+    let client = crate::TipContractClient::new(&env, &contract_id);
+    extract_error(client.try_pause(&admin))
+}
+
+fn case_not_authorized() -> TipError {
+    let t = TestEnv::new();
+    let impostor = Address::generate(&t.env);
+    extract_error(t.tip_client().try_set_admin(&impostor, &impostor))
+}
+
+fn case_invalid_input() -> TipError {
+    let t = TestEnv::new();
+    let long_name = s(&t.env, "0123456789012345678901234567890123456789012345678901234567890123456789");
+    extract_error(t.tip_client().try_register(&t.admin, &Symbol::new(&t.env, "u1"), &long_name, &s(&t.env, "")))
+}
+
+fn case_paused() -> TipError {
+    let t = TestEnv::new();
+    t.tip_client().pause(&t.admin);
+    extract_error(t.tip_client().try_register(&t.admin, &Symbol::new(&t.env, "u2"), &s(&t.env, "N"), &s(&t.env, "")))
+}
+
+fn case_creator_already_exists() -> TipError {
+    let t = TestEnv::new();
+    t.tip_client().register(&t.admin, &Symbol::new(&t.env, "u3"), &s(&t.env, "N"), &s(&t.env, ""));
+    extract_error(t.tip_client().try_register(&t.admin, &Symbol::new(&t.env, "u3b"), &s(&t.env, "N"), &s(&t.env, "")))
+}
+
+fn case_username_taken() -> TipError {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "same"), &s(&t.env, "A"), &s(&t.env, ""));
+    extract_error(t.tip_client().try_register(&bob, &Symbol::new(&t.env, "same"), &s(&t.env, "B"), &s(&t.env, "")))
+}
+
+fn case_cap_exceeded() -> TipError {
+    let t = TestEnv::new_with_caps(0, 1, 0);
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    t.tip_client().register(&alice, &Symbol::new(&t.env, "u4"), &s(&t.env, "A"), &s(&t.env, ""));
+    extract_error(t.tip_client().try_register(&bob, &Symbol::new(&t.env, "u5"), &s(&t.env, "B"), &s(&t.env, "")))
+}
+
+fn case_creator_not_found() -> TipError {
+    let t = TestEnv::new();
+    let stranger = Address::generate(&t.env);
+    extract_error(t.tip_client().try_update_profile(&stranger, &s(&t.env, "X"), &s(&t.env, "")))
+}
+
+fn case_balance_not_empty() -> TipError {
+    let t = TestEnv::new();
+    let creator = Address::generate(&t.env);
+    t.tip_client().register(&creator, &Symbol::new(&t.env, "u6"), &s(&t.env, "C"), &s(&t.env, ""));
+    t.tip_client().tip(&t.admin, &creator, &t.token_id, &100i128, &s(&t.env, ""));
+    extract_error(t.tip_client().try_unregister(&creator))
+}
+
+fn case_invalid_amount() -> TipError {
+    let t = TestEnv::new();
+    let creator = Address::generate(&t.env);
+    extract_error(t.tip_client().try_tip(&t.admin, &creator, &t.token_id, &0i128, &s(&t.env, "")))
+}
+
+fn case_below_minimum() -> TipError {
+    let t = TestEnv::new_with_min_tip(100);
+    let creator = Address::generate(&t.env);
+    extract_error(t.tip_client().try_tip(&t.admin, &creator, &t.token_id, &50i128, &s(&t.env, "")))
+}
+
+fn case_insufficient_balance() -> TipError {
+    let t = TestEnv::new();
+    let creator = Address::generate(&t.env);
+    t.tip_client().register(&creator, &Symbol::new(&t.env, "u7"), &s(&t.env, "C"), &s(&t.env, ""));
+    extract_error(t.tip_client().try_withdraw(&creator, &t.token_id, &10i128))
+}
+
+/// One row per `TipError` variant with a real, minimal reproducer. The three
+/// variants absent from this table (`TransferFailed`, `NoTips`,
+/// `FeeRecipientNotSet`) are declared in the enum but structurally
+/// unreachable through the current public API: `FeeRecipientNotSet`'s guard
+/// can never see a missing recipient because `init` requires one, and
+/// `TransferFailed`/`NoTips` are not raised anywhere in `lib.rs` today.
+static ERROR_CASES: &[(&str, TipError, fn() -> TipError)] = &[
+    ("init twice", TipError::AlreadyInitialized, case_already_initialized),
+    ("call before init", TipError::NotInitialized, case_not_initialized),
+    ("set_admin from non-admin", TipError::NotAuthorized, case_not_authorized),
+    ("display_name > 64 bytes", TipError::InvalidInput, case_invalid_input),
+    ("register while paused", TipError::Paused, case_paused),
+    ("register same caller twice", TipError::CreatorAlreadyExists, case_creator_already_exists),
+    ("register duplicate username", TipError::UsernameTaken, case_username_taken),
+    ("register past max_creators", TipError::CapExceeded, case_cap_exceeded),
+    ("update_profile unregistered caller", TipError::CreatorNotFound, case_creator_not_found),
+    ("unregister with nonzero balance", TipError::BalanceNotEmpty, case_balance_not_empty),
+    ("tip with amount <= 0", TipError::InvalidAmount, case_invalid_amount),
+    ("tip below configured minimum", TipError::BelowMinimum, case_below_minimum),
+    ("withdraw more than balance", TipError::InsufficientBalance, case_insufficient_balance),
+];
+
+#[test]
+fn test_error_variants_table() {
+    for (name, expected, case_fn) in ERROR_CASES {
+        let actual = case_fn();
+        assert_eq!(actual, *expected, "case `{}` produced wrong error", name);
+    }
 }
