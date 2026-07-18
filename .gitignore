@@ -20,6 +20,9 @@ Thumbs.db
 .env.local
 CLAUDE.md
 plan.md
+tasks/
+ASSUMPTIONS.md
 
 # Fuzz test snapshots (auto-generated, partial runs)
 test_snapshots/fuzz/
+test_snapshots
