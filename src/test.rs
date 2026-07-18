@@ -225,7 +225,7 @@ fn test_init_fee_recipient_is_contract_address() {
     });
 
     let admin = Address::generate(&env);
-    let contract_id = env.register(TipContract, ());
+    let contract_id = env.register_contract(None, TipContract);
 
     // Deploy a Stellar Asset Contract (token) using the modern API.
     let token_admin = Address::generate(&env);
@@ -425,7 +425,7 @@ fn test_set_fee_recipient() {
 #[should_panic(expected = "#12")]
 fn test_set_fee_recipient_contract_address() {
     let t = TestEnv::new();
-    let new_recipient = env.current_contract_address();
+    let new_recipient = t.env.current_contract_address();
     t.tip_client().set_fee_recipient(&t.admin, &new_recipient);
 }
 
