@@ -41,7 +41,7 @@ impl FuzzEnv {
 
         let admin = Address::generate(&env);
         let fee_recipient = Address::generate(&env);
-        let contract_id = env.register(TipContract, ());
+        let contract_id = env.register_contract(None, TipContract);
 
         let token_admin = Address::generate(&env);
         let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
