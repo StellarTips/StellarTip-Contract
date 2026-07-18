@@ -285,6 +285,9 @@ impl TipContract {
         if min_tip_amount < 0 {
             panic_with_error!(env, TipError::InvalidInput);
         }
+        if fee_recipient == env.current_contract_address() {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
         env.storage().instance().set(&DataKey::Admin, &caller);
         env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
@@ -378,6 +381,9 @@ impl TipContract {
             .unwrap_or_else(|| panic_with_error!(env, TipError::NotInitialized));
         if caller != admin {
             panic_with_error!(env, TipError::NotAuthorized);
+        }
+        if fee_recipient == env.current_contract_address() {
+            panic_with_error!(env, TipError::InvalidInput);
         }
         env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
         extend_instance_ttl(&env);
