@@ -407,6 +407,26 @@ fn test_set_fee_unauthorized_fails() {
     t.tip_client().set_fee_percentage(&rando, &100u32);
 }
 
+#[test]
+#[should_panic(expected = "#12")]
+fn test_set_admin_self_transfer_fails() {
+    let t = TestEnv::new();
+    let old_admin = t.tip_client().get_admin().unwrap();
+    let new_admin = old_admin;
+    t.tip_client().set_admin(&t.admin, &new_admin);
+}
+
+#[test]
+#[should_panic(expected = "#12")]
+fn test_set_admin_zero_address_fails() {
+    let t = TestEnv::new();
+    let new_admin = Address::from_string(&String::from_str(
+        &t.env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ));
+    t.tip_client().set_admin(&t.admin, &new_admin);
+}
+
 // ---------------------------------------------------------------------------
 // Registration tests
 // ---------------------------------------------------------------------------

@@ -312,6 +312,15 @@ impl TipContract {
         if caller != current_admin {
             panic_with_error!(env, TipError::NotAuthorized);
         }
+        if new_admin == caller
+            || new_admin
+                == Address::from_string(&String::from_str(
+                    &env,
+                    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                ))
+        {
+            panic_with_error!(env, TipError::InvalidInput);
+        }
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         extend_instance_ttl(&env);
         env.events().publish((EVENT_ADMIN_CHANGED, caller), new_admin);
