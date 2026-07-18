@@ -207,6 +207,46 @@ fn test_init_twice_fails() {
 }
 
 #[test]
+#[should_panic(expected = "#12")]
+fn test_init_fee_recipient_is_contract_address() {
+    let env: Env = Env::default();
+    env.mock_all_auths();
+
+    // Advance the ledger so timestamps are > 0.
+    env.ledger().set(LedgerInfo {
+        timestamp: 1000,
+        protocol_version: 22,
+        sequence_number: 100,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_persistent_entry_ttl: 10,
+        max_entry_ttl: 1_000_000,
+        min_temp_entry_ttl: 10,
+    });
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(TipContract, ());
+
+    // Deploy a Stellar Asset Contract (token) using the modern API.
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_id = token_contract.address();
+    let fee_recipient = contract_id.clone();
+
+    let t = TestEnv { env, contract_id, admin, fee_recipient, token_id };
+
+    // Initialize contract with the library-default caps and no fee.
+    t.tip_client().init(
+        &t.admin,
+        &t.fee_recipient,
+        &0u32,
+        &crate::DEFAULT_MAX_CREATORS,
+        &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+        &crate::DEFAULT_MIN_TIP_AMOUNT,
+    );
+}
+
+#[test]
 fn test_init_emits_event() {
     // Use a dedicated env so we can inspect emitted events directly,
     // independent of the shared TestEnv construction path.
@@ -379,6 +419,14 @@ fn test_set_fee_recipient() {
     let new_recipient = Address::generate(&t.env);
     t.tip_client().set_fee_recipient(&t.admin, &new_recipient);
     assert_eq!(t.tip_client().get_fee_recipient(), Some(new_recipient));
+}
+
+#[test]
+#[should_panic(expected = "#12")]
+fn test_set_fee_recipient_contract_address() {
+    let t = TestEnv::new();
+    let new_recipient = env.current_contract_address();
+    t.tip_client().set_fee_recipient(&t.admin, &new_recipient);
 }
 
 #[test]
