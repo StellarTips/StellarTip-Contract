@@ -79,6 +79,11 @@ transparency.
 
 ## Getting Started
 
+Production operators should review the
+[administrator runbook](docs/ADMIN_RUNBOOK.md) before deploying. It contains
+tested response procedures for key compromise, emergency pause, unexpected fee
+changes, admin handover, and platform incidents.
+
 ### Prerequisites
 
 - Rust (nightly) – <https://rustup.rs>
