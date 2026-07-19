@@ -8,16 +8,10 @@ crate-type = ["cdylib"]
 doctest = false
 
 [dependencies]
-# Pinned to 21.7.7 (latest 21.x line). Every `soroban-sdk 22.0.x` patch
-# transitively pins `soroban-env-host = "=22.1.x"`, which compiles
-# `ChaCha20Rng` into the testutils path and requires `ed25519-dalek`'s
-# CryptoRng trait; combined with the recent ed25519-dalek 3.0.0 + a
-# gitignored Cargo.lock, this breaks `cargo test` on CI. 21.7.7 pairs
-# with `soroban-env-host 21.2.1` which compiles cleanly.
-soroban-sdk = "=21.7.7"
+soroban-sdk = "22.0.11"
 
 [dev-dependencies]
-soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
+soroban-sdk = { version = "22.0.11", features = ["testutils"] }
 proptest = "1.4.0"
 
 [profile.release]
