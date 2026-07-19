@@ -23,6 +23,17 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  deny:
+    name: Cargo Deny Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cargo Deny Check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
