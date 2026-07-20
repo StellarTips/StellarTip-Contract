@@ -892,6 +892,9 @@ impl TipContract {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+mod fixtures;
+
+#[cfg(test)]
 mod test;
 
 #[cfg(test)]

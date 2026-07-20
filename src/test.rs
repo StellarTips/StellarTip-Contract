@@ -8,7 +8,10 @@ use soroban_sdk::{
 };
 use token::Client as TokenClient;
 
-use crate::TipContract;
+use crate::{
+    fixtures::{RebasingToken, RebasingTokenClient},
+    TipContract,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -154,6 +157,15 @@ impl TestEnv {
         sac.mint(&self.admin, &1_000_000_000);
         let client = TokenClient::new(&self.env, &id);
         (id, client, sac)
+    }
+
+    /// Deploy a `RebasingToken` fixture. Returns its address and a client.
+    /// The token starts at rebase factor (1, 1), so it behaves like an
+    /// ordinary token until a test calls `rebase`.
+    fn deploy_rebasing_token(&self) -> (Address, RebasingTokenClient<'_>) {
+        let id = self.env.register_contract(None, RebasingToken);
+        let client = RebasingTokenClient::new(&self.env, &id);
+        (id, client)
     }
 
     /// Deploy `count` additional Stellar asset tokens and mint the admin a
@@ -1652,4 +1664,143 @@ fn test_min_tip_amount_negative_setter_fails() {
 fn test_contract_version_is_3() {
     let t = TestEnv::new();
     assert_eq!(t.tip_client().get_contract_version(), 3);
+}
+
+// ---------------------------------------------------------------------------
+// Rebasing / non-standard token characterization tests (issue #85)
+// ---------------------------------------------------------------------------
+//
+// These tests do not assert a defence. They pin down and publish an accepted
+// property: `TipContract` credits `Balance(creator, token)` from the `amount`
+// argument and never reconciles it against `token.balance()`, so the invariant
+// `sum(internal balances for T) == T.balance(contract)` is implicit and
+// unenforced. A rebasing token — a legal SEP-41 token — breaks it silently.
+//
+// What the suite establishes: internal bookkeeping stays authoritative,
+// divergence is confined to the offending token, and the consequences (stranded
+// surplus, under-collateralisation, a wipeout that still blocks `unregister`)
+// are known rather than surprising. Choosing which tokens to accept is the
+// supporter's and creator's responsibility. See `SECURITY.md`.
+//
+// The fee path is deliberately untested here: that the fee recipient's balance
+// rebases is a property of the fixture, not of `TipContract`. The genuinely
+// contract-relevant sibling is *fee-on-transfer*, which needs its own fixture.
+
+/// Register `alice`, fund `bob` on a fresh `RebasingToken`, and tip 1_000 at
+/// the default (1, 1) factor. Returns the token address and its client.
+fn seed_rebasing_tip<'a>(
+    t: &'a TestEnv,
+    alice: &Address,
+    bob: &Address,
+) -> (Address, RebasingTokenClient<'a>) {
+    let (token_id, token) = t.deploy_rebasing_token();
+    t.tip_client().register(alice, &Symbol::new(&t.env, "alice"), &s(&t.env, "A"), &s(&t.env, ""));
+    token.mint(bob, &10_000);
+    t.tip_client().tip(bob, alice, &token_id, &1_000, &s(&t.env, ""));
+    (token_id, token)
+}
+
+#[test]
+fn test_rebasing_token_does_not_affect_internal_balance() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 1_000);
+    assert_eq!(token.balance(&t.contract_id), 1_000);
+
+    // Doubling rebase: the token says the contract holds 2_000, the internal
+    // ledger is untouched.
+    token.rebase(&2, &1);
+    assert_eq!(token.balance(&t.contract_id), 2_000);
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 1_000);
+
+    // Halving rebase: the token says 500, the internal ledger still says 1_000.
+    token.rebase(&1, &2);
+    assert_eq!(token.balance(&t.contract_id), 500);
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 1_000);
+}
+
+#[test]
+#[should_panic(expected = "#900")]
+fn test_rebasing_token_downward_rebase_makes_withdraw_fail_at_token_layer() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    token.rebase(&1, &2);
+
+    // The internal ledger still credits alice 1_000, so TipContract's own
+    // InsufficientBalance (#4) guard passes. The revert comes from the token:
+    // #900 proves it happened below the contract, not inside it.
+    t.tip_client().withdraw(&alice, &token_id, &1_000);
+}
+
+#[test]
+fn test_rebasing_token_downward_rebase_still_permits_partial_withdraw() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    token.rebase(&1, &2);
+    t.tip_client().withdraw(&alice, &token_id, &500);
+
+    // Alice received the full 500 nominal and the contract is drained...
+    assert_eq!(token.balance(&alice), 500);
+    assert_eq!(token.balance(&t.contract_id), 0);
+    // ...yet the internal ledger still promises her another 500. This is the
+    // sharpest statement of the risk: unbacked internal credit.
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 500);
+}
+
+#[test]
+fn test_rebasing_token_upward_rebase_strands_surplus_in_contract() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    token.rebase(&2, &1);
+    t.tip_client().withdraw(&alice, &token_id, &1_000);
+
+    // Alice gets exactly her internal credit and the ledger closes out.
+    assert_eq!(token.balance(&alice), 1_000);
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 0);
+    assert_eq!(t.tip_client().get_all_tokens(&alice).len(), 0);
+    // The other 1_000 is permanently stranded — there is no sweep function.
+    assert_eq!(token.balance(&t.contract_id), 1_000);
+}
+
+#[test]
+fn test_rebasing_token_wipeout_does_not_unblock_unregister() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    token.rebase(&0, &1);
+
+    assert_eq!(token.balance(&t.contract_id), 0);
+    // Internal credit and the tracked token set are untouched by the wipeout.
+    assert_eq!(t.tip_client().get_balance(&alice, &token_id), 1_000);
+    assert_eq!(t.tip_client().get_all_tokens(&alice).len(), 1);
+}
+
+#[test]
+#[should_panic(expected = "#13")]
+fn test_rebasing_token_wipeout_unregister_fails() {
+    let t = TestEnv::new();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    let (_token_id, token) = seed_rebasing_tip(&t, &alice, &bob);
+
+    token.rebase(&0, &1);
+
+    // BalanceNotEmpty still pins the profile even though the token reports
+    // zero. The one case where "internal bookkeeping is authoritative" is
+    // protective rather than harmful.
+    t.tip_client().unregister(&alice);
 }
