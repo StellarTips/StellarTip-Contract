@@ -1,0 +1,46 @@
+# lefthook.yml — local git hooks for StellarTip
+# Issue #113: run fmt + clippy on pre-commit (fast); run the test suite on
+# pre-push (slow). CI in `.github/workflows/ci.yml` mirrors these checks
+# independently, so the hooks only need to catch the common cases.
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
+    clippy:
+      glob: "*.rs"
+      # Note: deliberately diverges from CI here. CI runs
+      # `cargo clippy --target wasm32-unknown-unknown --release -- -D warnings`
+      # (matches the deployed artifact). We run a faster host-target lint
+      # (`--all-targets`, no wasm, no release) so pre-commit feedback stays
+      # fast. CI is still the source of truth — if it ever diverges, the
+      # CI version wins.
+      # `--locked` is intentionally omitted: this repo gitignores
+      # Cargo.lock and CI resolves `ed25519-dalek = 2.2.0` via a dedicated
+      # `cargo update --precise` step before `cargo test`. Replicating that
+      # in a pre-commit hook would be brittle on a fresh clone.
+      run: cargo clippy --all-targets -- -D warnings
+      skip_copy: true
+
+pre-push:
+  commands:
+    test:
+      # Mirrors `make test`. `--locked` is intentionally omitted for the
+      # same reason as in `clippy` above; CI applies the Cargo.lock
+      # resolution before its `cargo test` job.
+      run: cargo test
+
+# ---------------------------------------------------------------------------
+# Notes / CONTRIBUTING.md cross-link
+#
+# Installation (one of):
+#   brew install lefthook
+#   cargo binstall lefthook
+#   npm install -g @arkweid/lefthook
+#
+# The hooks are optional — CI is the final source of truth, and the same
+# checks run there. Installing lefthook locally just gives faster feedback
+# on commits and pushes.
+# ---------------------------------------------------------------------------

@@ -84,6 +84,16 @@ Production operators should review the
 tested response procedures for key compromise, emergency pause, unexpected fee
 changes, admin handover, and platform incidents.
 
+Developers integrating against or auditing the contract should consult:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — storage layout, lifecycle
+  state diagrams, sequence diagram for `tip()`, and the cross-cutting
+  invariants the contract relies on.
+- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) — curated reference for
+  every public method, error code, event, and constant. Auto-generated
+  rustdoc HTML lives at `target/doc/stellar_tip/index.html` after running
+  `make doc`.
+
 ### Prerequisites
 
 - Rust (nightly) – <https://rustup.rs>
@@ -136,7 +146,8 @@ make deploy-mainnet
 | `make fmt`        | Format code with rustfmt           |
 | `make lint`       | Run clippy lints                   |
 | `make scout`      | Run Scout static analysis          |
-| `make check`      | CI-style check (fmt + lint + scout + test + build) |
+| `make doc`        | Generate rustdoc HTML (`cargo doc --no-deps`) |
+| `make check`      | CI-style check (fmt + lint + scout + test + build + doc) |
 | `make clean`      | Remove build artifacts             |
 | `make deploy-testnet` | Deploy to Stellar testnet      |
 | `make deploy-mainnet` | Deploy to Stellar mainnet      |
@@ -174,7 +185,11 @@ Tip flow:
 │   ├── lib.rs                  # Contract logic
 │   └── test.rs                 # Unit tests (34 tests)
 ├── docs/
-│   └── static-analysis-findings.md  # Known static analysis findings
+│   ├── ADMIN_RUNBOOK.md        # Operator response procedures
+│   ├── API_REFERENCE.md        # Curated public-method reference
+│   ├── ARCHITECTURE.md         # Storage, lifecycle, and invariants
+│   ├── static-analysis-findings.md  # Known static analysis findings
+│   └── tutorial.md             # End-to-end testnet walkthrough
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # CI pipeline (fmt, lint, test, build, static analysis)
