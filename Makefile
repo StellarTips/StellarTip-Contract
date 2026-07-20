@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt lint check scout wasm-build deploy-testnet deploy-mainnet
+.PHONY: build test clean fmt lint check scout wasm-build doc deploy-testnet deploy-mainnet
 
 build:
 	cargo build --release
@@ -18,7 +18,10 @@ lint:
 scout:
 	cargo scout-audit
 
-check: fmt lint scout test wasm-build
+doc:
+	cargo doc --no-deps --document-private-items=false
+
+check: fmt lint scout test wasm-build doc
 	@echo "All checks passed!"
 
 clean:
