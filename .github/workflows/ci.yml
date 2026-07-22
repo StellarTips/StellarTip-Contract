@@ -131,3 +131,44 @@ jobs:
         with:
           name: scout-report
           path: report.md
+
+  coverage:
+    name: Coverage (≥ 85%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools-preview
+
+      # Pin the same ed25519-dalek version used in the test job to avoid
+      # soroban-env-host / rand_core incompatibilities.
+      - name: Pin ed25519-dalek to 2.2.0
+        run: |
+          cargo update -p ed25519-dalek@2.2.0 --precise 2.2.0 || true
+          cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0 || true
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6.14
+
+      - name: Run tests with coverage instrumentation
+        run: |
+          cargo llvm-cov \
+            --lcov \
+            --output-path lcov.info
+
+      - name: Enforce ≥ 85% line coverage
+        run: |
+          cargo llvm-cov report \
+            --fail-under-lines 85
+
+      - name: Upload coverage report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
