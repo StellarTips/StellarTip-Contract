@@ -18,6 +18,8 @@ jobs:
     environment: ${{ contains(github.ref, 'alpha') && 'staging' || 'production' }}
     permissions:
       contents: write
+      # Required by cosign for keyless signing via OIDC
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -39,15 +41,42 @@ jobs:
             echo "soroban CLI not installed; skipping optimization"
           fi
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign WASM with cosign (keyless, OIDC-backed)
+        # cosign sign-blob uses Sigstore's keyless signing: the GitHub
+        # Actions OIDC token acts as the signing identity. The resulting
+        # .bundle file contains the signature + transparency-log proof so
+        # consumers can verify provenance offline:
+        #   cosign verify-blob stellar_tip.wasm \
+        #     --bundle stellar_tip.wasm.cosign.bundle \
+        #     --certificate-identity-regexp "github.com/StellarTips/StellarTip-Contract" \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+        run: |
+          cosign sign-blob \
+            --yes \
+            --bundle target/wasm32-unknown-unknown/release/stellar_tip.wasm.cosign.bundle \
+            target/wasm32-unknown-unknown/release/stellar_tip.wasm
+          echo "Signature bundle written to stellar_tip.wasm.cosign.bundle"
+
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: stellar_tip.wasm
           path: target/wasm32-unknown-unknown/release/stellar_tip.wasm
 
+      - name: Upload cosign bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellar_tip.wasm.cosign.bundle
+          path: target/wasm32-unknown-unknown/release/stellar_tip.wasm.cosign.bundle
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/wasm32-unknown-unknown/release/stellar_tip.wasm
+          files: |
+            target/wasm32-unknown-unknown/release/stellar_tip.wasm
+            target/wasm32-unknown-unknown/release/stellar_tip.wasm.cosign.bundle
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
