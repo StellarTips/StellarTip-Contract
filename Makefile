@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt lint check scout wasm-build doc deploy-testnet deploy-mainnet
+.PHONY: build test clean fmt lint check scout wasm-build doc deploy-testnet deploy-mainnet interact-testnet
 
 build:
 	cargo build --release
@@ -32,3 +32,9 @@ deploy-testnet:
 
 deploy-mainnet:
 	./scripts/deploy.sh mainnet
+
+## Invoke a function on the deployed testnet contract.
+## Usage: make interact-testnet FN=get_contract_version
+##        make interact-testnet FN=get_profile ARGS="--address GABC..."
+interact-testnet:
+	./scripts/interact.sh $(FN) $(ARGS)
