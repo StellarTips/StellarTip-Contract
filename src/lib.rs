@@ -73,33 +73,200 @@ pub struct Tip {
 // Errors
 // ---------------------------------------------------------------------------
 
+/// All error variants raised by the StellarTip contract.
+///
+/// # Panic vs. return semantics
+///
+/// Every variant is raised via `panic_with_error!(env, TipError::Variant)`.
+/// Soroban treats this as a host-level trap: **all storage writes and all
+/// emitted events in the same transaction are rolled back atomically**.
+/// Clients that "fire and forget" (submit without waiting for confirmation)
+/// may observe a failed transaction with no on-chain side effects — the
+/// supporter's funds are never moved, the creator's balance is unchanged, and
+/// no events are emitted.
+///
+/// # Client recovery
+///
+/// Use `simulateTransaction` before broadcasting to surface errors before any
+/// fees are charged.  For detailed per-variant retry guidance see
+/// [`docs/client-failure-handling.md`](../docs/client-failure-handling.md).
 mod error {
     use soroban_sdk::contracterror;
 
+    /// Contract error codes.  Each variant maps to a Soroban `contractError`
+    /// integer discriminant visible in the RPC response as `#N`.
+    ///
+    /// Variants are grouped below by the retry policy a client should adopt:
+    ///
+    /// **Never retry (deterministic):** `#1`, `#3`, `#6`, `#8`, `#9`, `#11`,
+    /// `#12`, `#13`, `#15`.
+    ///
+    /// **Retry after condition lifts:** `#2`, `#4`, `#5`, `#10`, `#14`, `#16`.
+    ///
+    /// **Dead code (currently unreachable):** `#7`.
     #[contracterror]
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub enum TipError {
+        /// `#1` — Raised by `register()` when the caller's address already has
+        /// a registered profile.
+        ///
+        /// **When to panic:** inside `register()` after a successful
+        /// `env.storage().persistent().has(&DataKey::Profile(caller))` check.
+        ///
+        /// **Client recovery:** the address is already a creator; skip
+        /// re-registration.  Never retry.
         CreatorAlreadyExists = 1,
+
+        /// `#2` — Raised when a function requires a registered creator profile
+        /// (e.g. `tip()`, `get_profile()`) but none exists for the given address.
+        ///
+        /// **When to panic:** inside `tip()` and profile-lookup helpers after
+        /// `env.storage().persistent().has(&DataKey::Profile(creator))` returns
+        /// `false`.
+        ///
+        /// **Client recovery:** verify the recipient address or username; re-fetch
+        /// the profile before retrying.
         CreatorNotFound = 2,
+
+        /// `#3` — Raised by `register()` when the requested username is already
+        /// claimed by a different address.
+        ///
+        /// **When to panic:** inside `register()` after
+        /// `env.storage().instance().has(&DataKey::UsernameToAddress(username))`
+        /// returns `true`.
+        ///
+        /// **Client recovery:** prompt the user to choose a different username.
+        /// Never retry with the same username.
         UsernameTaken = 3,
+
+        /// `#4` — Raised by `withdraw()` when the requested withdrawal amount
+        /// exceeds the creator's recorded on-contract balance for the given token.
+        ///
+        /// **When to panic:** inside `withdraw()` after reading
+        /// `DataKey::Balance(creator, token)` and finding it less than `amount`.
+        ///
+        /// **Client recovery:** re-read the balance via `get_balance()` and
+        /// reduce the withdrawal amount accordingly.
         InsufficientBalance = 4,
+
+        /// `#5` — Raised when the underlying Stellar Asset Contract (SAC)
+        /// `transfer()` call fails (e.g. the supporter's wallet has insufficient
+        /// funds, the asset is frozen, or the SAC rejects the transfer).
+        ///
+        /// **When to panic:** inside `tip()` after the SAC `transfer()` invocation
+        /// returns an error.
+        ///
+        /// **Client recovery:** check the user's wallet balance and asset status;
+        /// surface a wallet-level error to the user; retry only after the
+        /// underlying condition is resolved.
         TransferFailed = 5,
+
+        /// `#6` — Raised when `amount` is zero or negative.
+        ///
+        /// **When to panic:** inside `tip()` as the first argument guard.
+        ///
+        /// **Client recovery:** validate `amount > 0` before building the
+        /// transaction.  Never retry with the same value.
         InvalidAmount = 6,
+
+        /// `#7` — Defined for completeness; **currently unreachable** in the
+        /// live implementation.  No production code path raises this variant.
+        ///
+        /// **Client recovery:** treat as an unexpected internal error if ever
+        /// encountered.
         NoTips = 7,
+
+        /// `#8` — Raised by any state-changing function when `init()` has not
+        /// yet been called (the `Admin` storage key is absent).
+        ///
+        /// **When to panic:** inside `check_initialized_and_not_paused()`.
+        ///
+        /// **Client recovery:** contact the platform operator; the contract has
+        /// not been set up.  Never retry.
         NotInitialized = 8,
+
+        /// `#9` — Raised by `init()` when called a second time (the `Admin`
+        /// storage key already exists).
+        ///
+        /// **When to panic:** at the top of `init()`.
+        ///
+        /// **Client recovery:** the contract is already live; no action needed.
+        /// Never retry.
         AlreadyInitialized = 9,
+
+        /// `#10` — Raised by any user-facing state-changing function when the
+        /// contract is in emergency-pause state (`DataKey::Paused == true`).
+        ///
+        /// **When to panic:** inside `check_initialized_and_not_paused()`.
+        ///
+        /// **Client recovery:** poll `is_paused()` with exponential backoff;
+        /// notify the user and retry only after the contract is unpaused by the
+        /// admin.
         Paused = 10,
+
+        /// `#11` — Raised by admin-gated functions when the `caller` is not the
+        /// current admin address stored in `DataKey::Admin`.
+        ///
+        /// **When to panic:** in every admin function after
+        /// `caller.require_auth()` succeeds but the stored admin address does not
+        /// match.
+        ///
+        /// **Client recovery:** never expose admin functions to non-admin users.
+        /// Never retry.
         NotAuthorized = 11,
+
+        /// `#12` — Raised by `register()` and `update_profile()` when
+        /// `display_name` or `bio` exceed their maximum byte lengths
+        /// (`MAX_DISPLAY_NAME_LEN = 64` and `MAX_BIO_LEN = 256` respectively).
+        ///
+        /// **When to panic:** inside `validate_input()`.
+        ///
+        /// **Client recovery:** enforce length limits in the UI before
+        /// submission.  Never retry with the same values.
         InvalidInput = 12,
+
+        /// `#13` — Raised by `unregister()` when the creator still holds a
+        /// non-zero balance for at least one token.
+        ///
+        /// **When to panic:** inside `unregister()` after iterating
+        /// `DataKey::CreatorTokens(caller)` and finding a positive balance.
+        ///
+        /// **Client recovery:** direct the user to call `withdraw()` for every
+        /// token until all balances reach zero, then retry `unregister()`.
         BalanceNotEmpty = 13,
-        /// Raised when an admin-configured cap (`MaxCreators` or
+
+        /// `#14` — Raised when an admin-configured cap (`MaxCreators` or
         /// `MaxTipsPerCreator`) has been reached.
+        ///
+        /// **When to panic:** inside `register()` when
+        /// `CreatorCount >= MaxCreators`, or inside `tip()` when
+        /// `TipCount(creator) >= MaxTipsPerCreator`.
+        ///
+        /// **Client recovery:** notify the user that the platform's capacity
+        /// limit has been reached; retry only after the admin raises the cap via
+        /// `set_max_creators()` or `set_max_tips_per_creator()`.
         CapExceeded = 14,
-        /// Returned when a non-zero `fee_bps` is configured but the
-        /// `FeeRecipient` storage key is missing (e.g. corrupted state).
+
+        /// `#15` — Raised when a tip is attempted with `fee_bps > 0` but the
+        /// `FeeRecipient` storage key is absent (contract misconfiguration).
+        ///
+        /// **When to panic:** inside `tip()` after reading
+        /// `DataKey::FeeRecipient` and finding no value despite a non-zero fee.
+        ///
+        /// **Client recovery:** contact the platform operator; this indicates a
+        /// contract state corruption or incomplete initialisation.  Never retry.
         FeeRecipientNotSet = 15,
-        /// Returned when `amount` is positive but below the configured
-        /// `MinTipAmount`.
+
+        /// `#16` — Raised when `amount` is positive but below the configured
+        /// `MinTipAmount` floor set by the admin.
+        ///
+        /// **When to panic:** inside `tip()` after the `amount > 0` guard but
+        /// before the SAC transfer, when
+        /// `amount < env.storage().instance().get(&DataKey::MinTipAmount)`.
+        ///
+        /// **Client recovery:** fetch the current minimum via
+        /// `get_min_tip_amount()` and re-present the updated floor to the user.
+        /// **Do not** blindly retry with the same amount; re-quote first.
         BelowMinimum = 16,
     }
 }
