@@ -39,15 +39,45 @@ jobs:
             echo "soroban CLI not installed; skipping optimization"
           fi
 
+      - name: Generate SHA256 manifest
+        run: |
+          sha256sum target/wasm32-unknown-unknown/release/stellar_tip.wasm \
+            > target/wasm32-unknown-unknown/release/stellar_tip.wasm.sha256
+          echo "SHA256 manifest:"
+          cat target/wasm32-unknown-unknown/release/stellar_tip.wasm.sha256
+
+      - name: Generate SBOM (cargo-tree JSON)
+        run: |
+          cargo tree --format json \
+            > target/wasm32-unknown-unknown/release/stellar_tip.sbom.json 2>/dev/null || \
+          cargo tree --prefix none \
+            > target/wasm32-unknown-unknown/release/stellar_tip.sbom.json
+          echo "SBOM generated ($(wc -l < target/wasm32-unknown-unknown/release/stellar_tip.sbom.json) lines)"
+
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: stellar_tip.wasm
           path: target/wasm32-unknown-unknown/release/stellar_tip.wasm
 
+      - name: Upload SHA256 manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellar_tip.wasm.sha256
+          path: target/wasm32-unknown-unknown/release/stellar_tip.wasm.sha256
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stellar_tip.sbom.json
+          path: target/wasm32-unknown-unknown/release/stellar_tip.sbom.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/wasm32-unknown-unknown/release/stellar_tip.wasm
+          files: |
+            target/wasm32-unknown-unknown/release/stellar_tip.wasm
+            target/wasm32-unknown-unknown/release/stellar_tip.wasm.sha256
+            target/wasm32-unknown-unknown/release/stellar_tip.sbom.json
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
