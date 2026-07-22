@@ -1,0 +1,18 @@
+[package]
+name = "stellar-tip-orchestrator"
+version = "0.1.0"
+edition = "2021"
+description = "Example: forward tip/register calls into the StellarTip contract."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+# Match the parent crate's pin (see ../../Cargo.toml). contractimport! below
+# reads the compiled StellarTip WASM and re-exports its method shapes.
+[dependencies]
+soroban-sdk = "=21.7.7"
+
+[dev-dependencies]
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
