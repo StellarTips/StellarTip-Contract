@@ -102,6 +102,12 @@ jobs:
         # `target/doc/stellar_tip/index.html`, which is the line-by-line
         # source of truth for `docs/API_REFERENCE.md`. `--no-deps` keeps
         # CI logs (and rustdoc failures) scoped to this crate.
+        # `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links"` promotes any
+        # unresolved intra-doc link to a hard error, ensuring all cross-
+        # references in rustdoc comments (including TipError variant docs)
+        # stay valid as the codebase evolves.
+        env:
+          RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links"
         run: cargo doc --no-deps
       - name: Upload rustdoc artifact
         if: always()
