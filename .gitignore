@@ -26,3 +26,6 @@ ASSUMPTIONS.md
 # Fuzz test snapshots (auto-generated, partial runs)
 test_snapshots/fuzz/
 test_snapshots
+# Python bytecode caches
+**/__pycache__/
+*.py[cod]
