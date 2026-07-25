@@ -89,6 +89,49 @@ jobs:
       - name: Build WASM
         run: cargo build --release --target wasm32-unknown-unknown
 
+  # Soroban protocol compatibility matrix (refs issue #84).
+  # Validates that the contract uses no host functions introduced in
+  # later patch releases, so deployment against the minimum supported
+  # protocol does not silently fail in production.
+  sdk-matrix:
+    name: SDK Compatibility (${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sdk:
+          - "=21.0.0"   # minimum supported protocol 21 SDK
+          - "=21.7.7"   # current pinned version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          target: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-sdk-matrix-${{ matrix.sdk }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-sdk-matrix-${{ matrix.sdk }}-
+            ${{ runner.os }}-cargo-sdk-matrix-
+      - name: Swap SDK version
+        # Swaps both [dependencies] and [dev-dependencies] entries so
+        # `cargo check` sees a consistent version graph.  Uses a
+        # two-step pattern: first replace the simple dependency line,
+        # then replace the `version` field inside dev-dependencies.
+        run: |
+          sed -i 's/^soroban-sdk = "=21\.7\.7"/soroban-sdk = "${{ matrix.sdk }}"/' Cargo.toml
+          sed -i 's/version = "=21\.7\.7"/version = "${{ matrix.sdk }}"/' Cargo.toml
+      - name: Cargo Check
+        # Uses `check` (not `test`) to validate compilation across SDK
+        # versions without invoking testutils, which avoids
+        # ed25519-dalek / soroban-env-host compatibility pitfalls.
+        run: cargo check --target wasm32-unknown-unknown --release
+
   doc:
     name: Generate API Documentation (rustdoc)
     runs-on: ubuntu-latest
