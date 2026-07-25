@@ -97,9 +97,10 @@ jobs:
     name: SDK Compatibility (${{ matrix.sdk }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         sdk:
-          - "=21.0.0"   # minimum supported protocol 21 SDK
+          - "=21.7.0"   # earliest available protocol 21 SDK (21.0.0 was yanked)
           - "=21.7.7"   # current pinned version
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +131,14 @@ jobs:
         run: |
           sed -i "s/^soroban-sdk = \"=21\.7\.7\"/soroban-sdk = \"$SDK_VERSION\"/" Cargo.toml
           sed -i "s/version = \"=21\.7\.7\"/version = \"$SDK_VERSION\"/" Cargo.toml
+      - name: Update ethnum (nightly compat)
+        # ethnum v1.5.0 (pinned by older soroban-env-guest releases)
+        # contains a transmute that newer nightly rustc rejects as
+        # E0512.  Upgrading to the latest compatible ethnum (≥ 1.5.3)
+        # resolves this without changing any soroban host-function
+        # surface — `cargo check` still catches genuine protocol-
+        # version regressions.
+        run: cargo update -p ethnum
       - name: Cargo Check
         # Uses `check` (not `test`) to validate compilation across SDK
         # versions without invoking testutils, which avoids

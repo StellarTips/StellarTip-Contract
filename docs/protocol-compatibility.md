@@ -16,7 +16,7 @@
 
 | Protocol | Minimum SDK     | Current Pinned SDK | Status    |
 |----------|-----------------|--------------------|-----------|
-| 21       | `soroban-sdk = "=21.0.0"` | `soroban-sdk = "=21.7.7"` | **Supported & CI-enforced** |
+| 21       | `soroban-sdk = "=21.7.0"` | `soroban-sdk = "=21.7.7"` | **Supported & CI-enforced** |
 
 > **Note on protocol 22:** Contract tests run with `protocol_version: 22` in
 > the Soroban test environment, confirming forward compatibility. The
@@ -31,16 +31,18 @@
 The CI pipeline (`sdk-matrix` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml))
 validates that the contract **compiles** without changes against **both**:
 
-1. **Minimum supported SDK (`=21.0.0`)** — proves no host functions
-   introduced in protocol 21 patch releases (or later) have leaked into the
+1. **Minimum supported SDK (`=21.7.0`)** — proves no host functions
+   introduced in protocol 21 patch releases 21.7.1+ have leaked into the
    contract source.
 2. **Current pinned SDK (`=21.7.7`)** — the exact version used in
    production builds, defined in the root [`Cargo.toml`](../Cargo.toml).
 
 This means: if `cargo check --target wasm32-unknown-unknown` passes for
-`=21.0.0`, deploying the WASM to a network running protocol 21 **will not**
-fail due to a missing host function import — every host function used by the
-contract is guaranteed to exist in the protocol 21 surface.
+`=21.7.0`, deploying the WASM to a network running protocol 21 **will not**
+fail due to a missing host function import. The subset of host functions
+verified is narrower than it would be with the original 21.0.0 baseline,
+but 21.0.0 was yanked from crates.io and earlier 21.x releases do not
+compile on current nightly Rust without a dependency workaround.
 
 ### Why not run tests across the matrix?
 
