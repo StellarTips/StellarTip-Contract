@@ -123,9 +123,13 @@ jobs:
         # `cargo check` sees a consistent version graph.  Uses a
         # two-step pattern: first replace the simple dependency line,
         # then replace the `version` field inside dev-dependencies.
+        # SDk version is routed through an env var to avoid
+        # expression-injection (CodeQL actions/code-injection).
+        env:
+          SDK_VERSION: ${{ matrix.sdk }}
         run: |
-          sed -i 's/^soroban-sdk = "=21\.7\.7"/soroban-sdk = "${{ matrix.sdk }}"/' Cargo.toml
-          sed -i 's/version = "=21\.7\.7"/version = "${{ matrix.sdk }}"/' Cargo.toml
+          sed -i "s/^soroban-sdk = \"=21\.7\.7\"/soroban-sdk = \"$SDK_VERSION\"/" Cargo.toml
+          sed -i "s/version = \"=21\.7\.7\"/version = \"$SDK_VERSION\"/" Cargo.toml
       - name: Cargo Check
         # Uses `check` (not `test`) to validate compilation across SDK
         # versions without invoking testutils, which avoids
