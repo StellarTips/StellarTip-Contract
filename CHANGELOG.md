@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rust-toolchain.toml` to pin the Rust toolchain
 - `CONTRIBUTING.md` with development workflow
 - `LICENSE` (MIT)
+- CI: SDK protocol compatibility matrix — validates compilation against minimum (`=21.7.0`) and current (`=21.7.7`) Soroban SDK versions (#103)
 
 ### Changed
 - `register()` now requires the contract to be initialized and not paused
