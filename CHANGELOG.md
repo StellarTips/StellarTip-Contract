@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `init(admin, fee_recipient, fee_bps)` – one-time contract initialization
+- CI: `changelog` job that diffs `src/lib.rs`'s public API surface against the PR base and fails when `CHANGELOG.md` is not updated (Issue #112)
+- `scripts/check_changelog.sh` – the bash check invoked by the new job; reusable locally via `BASE_REF=origin/main HEAD_REF=HEAD bash scripts/check_changelog.sh`
+- `make check-changelog` – convenience target for running the check offline
+- `init(admin, fee_recipient, fee_bps, max_creators, max_tips_per_creator, min_tip_amount)` – one-time contract initialization (v3: now takes storage-bloat caps and a minimum tip amount)
 - `update_profile()` – allows creators to update their display name and bio
 - `unregister()` – allows creators to delete their profile when balances are zero
 - `get_tips(start, limit)` – paginated function for fetching tip history in ranges

@@ -138,6 +138,31 @@ jobs:
           name: scout-report
           path: report.md
 
+  changelog:
+    name: Changelog Check (#112)
+    # Issue #112: enforce CHANGELOG line on PRs that touch the public surface.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # `fetch-depth: 0` is required so that the merge-base against
+          # the PR base ref can be computed inside `scripts/check_changelog.sh`.
+          fetch-depth: 0
+      # Fork PRs don't always have the PR base SHA present locally even
+      # with fetch-depth: 0 (the upstream maintainer's `main` is not part
+      # of the PR's fetch ref-set).  An explicit fetch closes that gap so
+      # the changelog check is enforced for external contributors too.
+      - name: Fetch PR base ref (fork-PR safety)
+        run: git fetch --no-tags origin ${{ github.event.pull_request.base.sha }}
+      - name: Verify CHANGELOG entry
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.sha }}
+        run: bash scripts/check_changelog.sh
+
   coverage:
     name: Coverage (≥ 85%)
     runs-on: ubuntu-latest
