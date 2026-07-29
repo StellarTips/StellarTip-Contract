@@ -10,6 +10,17 @@ use soroban_sdk::{
 
 use crate::{TipContract, TipContractClient};
 
+/// Extract a string message from a caught panic payload.
+fn panic_message(e: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = e.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = e.downcast_ref::<&str>() {
+        s.to_string()
+    } else {
+        "<unknown panic payload>".to_string()
+    }
+}
+
 /// Convenience: create a `String` from a `&str`.
 fn s(env: &Env, text: &str) -> String {
     String::from_str(env, text)
@@ -188,5 +199,108 @@ proptest! {
             prop_assert_eq!(t.tip_client().get_balance(&creator, &t.token_id), 0);
             prop_assert_eq!(t.token_client().balance(&t.contract_id), 0);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: pause invariant (issue #96)
+    // -----------------------------------------------------------------------
+    //
+    // Once the contract is paused, every state-changing user operation
+    // (register, tip, withdraw, update_profile, unregister) must panic
+    // with Paused (#10).  The admin-only unpause function is excluded
+    // because it is the intended escape hatch.
+
+    #[test]
+    fn test_pause_invariant_all_user_ops_rejected(
+        amount in 1..100_000_000i128,
+        fee_bps in 0..2_500u32,
+    ) {
+        let t = FuzzEnv::new(fee_bps);
+
+        // Register a creator and send one tip — the creator needs a balance
+        // so that withdraw/unregister tests are meaningful after pause.
+        let creator = Address::generate(&t.env);
+        t.tip_client().register(&creator, &Symbol::new(&t.env, "creator"), &s(&t.env, "Creator"), &s(&t.env, "Bio"));
+
+        let tipper = Address::generate(&t.env);
+        t.stellar_client().mint(&tipper, &amount);
+        t.tip_client().tip(&tipper, &creator, &t.token_id, &amount, &s(&t.env, "pre-pause tip"));
+
+        // Capture pre-pause state for later comparison.
+        let balance_before = t.tip_client().get_balance(&creator, &t.token_id);
+        let creator_count_before = t.tip_client().get_creator_count();
+
+        // Pause the contract.
+        t.tip_client().pause(&t.admin);
+        prop_assert!(t.tip_client().is_paused());
+
+        // ----- register -----
+        let new_creator = Address::generate(&t.env);
+        let reg_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.tip_client().register(&new_creator, &Symbol::new(&t.env, "newbie"), &s(&t.env, "New"), &s(&t.env, ""));
+        }));
+        prop_assert!(reg_result.is_err(), "register should panic when paused");
+        prop_assert!(
+            panic_message(reg_result.unwrap_err()).contains("#10"),
+            "register should panic with Paused (#10)"
+        );
+
+        // ----- tip -----
+        let tip_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.tip_client().tip(&tipper, &creator, &t.token_id, &1, &s(&t.env, "tip-while-paused"));
+        }));
+        prop_assert!(tip_result.is_err(), "tip should panic when paused");
+        prop_assert!(
+            panic_message(tip_result.unwrap_err()).contains("#10"),
+            "tip should panic with Paused (#10)"
+        );
+
+        // ----- withdraw -----
+        if balance_before > 0 {
+            let wd_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                t.tip_client().withdraw(&creator, &t.token_id, &1);
+            }));
+            prop_assert!(wd_result.is_err(), "withdraw should panic when paused");
+            prop_assert!(
+                panic_message(wd_result.unwrap_err()).contains("#10"),
+                "withdraw should panic with Paused (#10)"
+            );
+        }
+
+        // ----- update_profile -----
+        let up_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.tip_client().update_profile(&creator, &s(&t.env, "NewName"), &s(&t.env, "NewBio"));
+        }));
+        prop_assert!(up_result.is_err(), "update_profile should panic when paused");
+        prop_assert!(
+            panic_message(up_result.unwrap_err()).contains("#10"),
+            "update_profile should panic with Paused (#10)"
+        );
+
+        // ----- unregister -----
+        let unreg_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.tip_client().unregister(&creator);
+        }));
+        prop_assert!(unreg_result.is_err(), "unregister should panic when paused");
+        prop_assert!(
+            panic_message(unreg_result.unwrap_err()).contains("#10"),
+            "unregister should panic with Paused (#10)"
+        );
+
+        // State must be unchanged after all failed ops.
+        prop_assert_eq!(t.tip_client().get_balance(&creator, &t.token_id), balance_before);
+        prop_assert_eq!(t.tip_client().get_creator_count(), creator_count_before);
+        prop_assert!(t.tip_client().is_creator(&creator));
+
+        // Unpause, then verify operations succeed again.
+        t.tip_client().unpause(&t.admin);
+        prop_assert!(!t.tip_client().is_paused());
+
+        // After unpause: tip must succeed.
+        let tip2_amount = 10i128.min(amount);
+        t.stellar_client().mint(&tipper, &tip2_amount);
+        t.tip_client().tip(&tipper, &creator, &t.token_id, &tip2_amount, &s(&t.env, "post-unpause tip"));
+        let expected_after = balance_before + tip2_amount - (tip2_amount * (fee_bps as i128)) / 10000;
+        prop_assert_eq!(t.tip_client().get_balance(&creator, &t.token_id), expected_after);
     }
 }
