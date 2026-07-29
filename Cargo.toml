@@ -20,6 +20,11 @@ soroban-sdk = "=21.7.7"
 soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
 proptest = "1.4.0"
 
+[features]
+# Enable fork tests against Stellar testnet (requires RPC access).
+# Usage: cargo test --features fork -- --ignored
+fork = []
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

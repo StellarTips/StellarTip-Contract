@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly fork tests against testnet (issue #88).
+    - cron: '0 3 * * *'
 
 env:
   CARGO_TERM_COLOR: always
@@ -259,3 +262,24 @@ jobs:
         with:
           name: coverage-lcov
           path: lcov.info
+
+  # Scheduled fork tests against Stellar testnet (issue #88).
+  # Stubbed pending soroban-sdk ≥ 22.x upgrade; all tests are
+  # `#[ignore]`-d, so this job passes harmlessly until real fork-
+  # mode assertions land.
+  fork-test:
+    name: Fork Test (testnet nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          target: wasm32-unknown-unknown
+      - name: Build WASM
+        run: cargo build --release --target wasm32-unknown-unknown
+      - name: Run fork tests (--ignored)
+        run: cargo test --features fork -- --ignored
+        env:
+          STELLAR_RPC_URL: https://soroban-testnet.stellar.org
