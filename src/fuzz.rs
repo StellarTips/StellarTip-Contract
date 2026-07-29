@@ -10,6 +10,27 @@ use soroban_sdk::{
 
 use crate::{TipContract, TipContractClient};
 
+/// A minimal deterministic pseudo-random number generator so that
+/// fuzz seeds produce reproducible sequences of operations.
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed.wrapping_add(1) }
+    }
+
+    fn next(&mut self) -> u64 {
+        // SplitMix64
+        self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+}
+
 /// Convenience: create a `String` from a `&str`.
 fn s(env: &Env, text: &str) -> String {
     String::from_str(env, text)
@@ -276,5 +297,122 @@ proptest! {
             prop_assert_eq!(t.tip_client().get_balance(&creator, &t.token_id), 0);
             prop_assert_eq!(t.token_client().balance(&t.contract_id), 0);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Fuzz: paused-mid-batch scenarios (issue #92)
+    // -----------------------------------------------------------------------
+    //
+    // Randomly interleave admin pause/unpause with user tips and assert
+    // no state corruption.  The property: sum of internal balances for
+    // every creator == contract's token balance (modulo fees forwarded
+    // to the fee recipient).
+
+    #[test]
+    fn test_paused_mid_batch_no_state_corruption(
+        seed in 0..u64::MAX,
+        num_ops in 3..30usize,
+        fee_bps in 0..2_500u32,
+    ) {
+        let t = FuzzEnv::new(fee_bps);
+
+        // Pre-register two creators.
+        let c1 = Address::generate(&t.env);
+        let c2 = Address::generate(&t.env);
+        t.tip_client().register(&c1, &Symbol::new(&t.env, "creator1"), &s(&t.env, "C1"), &s(&t.env, ""));
+        t.tip_client().register(&c2, &Symbol::new(&t.env, "creator2"), &s(&t.env, "C2"), &s(&t.env, ""));
+
+        let mut rng = SimpleRng::new(seed);
+        let mut expected_balance1: i128 = 0;
+        let mut expected_balance2: i128 = 0;
+        let mut cumulative_fee: i128 = 0;
+
+        for _ in 0..num_ops {
+            let op = rng.next() % 10;
+
+            match op {
+                0 => {
+                    // Pause (admin only).
+                    t.tip_client().pause(&t.admin);
+                }
+                1 => {
+                    // Unpause (admin only).
+                    t.tip_client().unpause(&t.admin);
+                }
+                2..=5 => {
+                    // Tip to c1.
+                    let is_paused = t.tip_client().is_paused();
+                    let tip_amount = (rng.next() % 10_000_000) as i128 + 1;
+                    let tipper = Address::generate(&t.env);
+                    t.stellar_client().mint(&tipper, &tip_amount);
+
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        t.tip_client().tip(&tipper, &c1, &t.token_id, &tip_amount, &s(&t.env, "fuzz"));
+                    }));
+
+                    match result {
+                        Ok(_) => {
+                            prop_assert!(!is_paused, "tip to c1 succeeded but contract is paused");
+                            let fee = (tip_amount * (fee_bps as i128)) / 10000;
+                            expected_balance1 += tip_amount - fee;
+                            cumulative_fee += fee;
+                        }
+                        Err(_) => {
+                            prop_assert!(is_paused, "tip to c1 panicked but contract is not paused");
+                        }
+                    }
+                }
+                6..=8 => {
+                    // Tip to c2.
+                    let is_paused = t.tip_client().is_paused();
+                    let tip_amount = (rng.next() % 10_000_000) as i128 + 1;
+                    let tipper = Address::generate(&t.env);
+                    t.stellar_client().mint(&tipper, &tip_amount);
+
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        t.tip_client().tip(&tipper, &c2, &t.token_id, &tip_amount, &s(&t.env, "fuzz"));
+                    }));
+
+                    match result {
+                        Ok(_) => {
+                            prop_assert!(!is_paused, "tip to c2 succeeded but contract is paused");
+                            let fee = (tip_amount * (fee_bps as i128)) / 10000;
+                            expected_balance2 += tip_amount - fee;
+                            cumulative_fee += fee;
+                        }
+                        Err(_) => {
+                            prop_assert!(is_paused, "tip to c2 panicked but contract is not paused");
+                        }
+                    }
+                }
+                _ => {
+                    // Withdraw from c1 — only if not paused.
+                    let is_paused = t.tip_client().is_paused();
+                    if !is_paused && expected_balance1 > 0 {
+                        let wd = (rng.next() % (expected_balance1 as u64 + 1)) as i128;
+                        if wd > 0 {
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                t.tip_client().withdraw(&c1, &t.token_id, &wd);
+                            }));
+                            if result.is_ok() {
+                                expected_balance1 -= wd;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Final invariant: internal balances must match actual state.
+        prop_assert_eq!(t.tip_client().get_balance(&c1, &t.token_id), expected_balance1);
+        prop_assert_eq!(t.tip_client().get_balance(&c2, &t.token_id), expected_balance2);
+
+        // Contract balance = sum of creator internal balances (fees already forwarded).
+        let contract_balance = t.token_client().balance(&t.contract_id);
+        prop_assert_eq!(contract_balance, expected_balance1 + expected_balance2);
+
+        // Fee recipient holds all forwarded fees.
+        let fee_recipient_balance = t.token_client().balance(&t.fee_recipient);
+        prop_assert_eq!(fee_recipient_balance, cumulative_fee);
     }
 }
