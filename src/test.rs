@@ -9,6 +9,7 @@ use soroban_sdk::{
 use token::Client as TokenClient;
 
 use crate::{
+    error::TipError,
     fixtures::{RebasingToken, RebasingTokenClient},
     TipContract,
 };
@@ -2191,4 +2192,357 @@ fn gas_init() {
     assert_eq!(client.get_fee_recipient().unwrap(), fee_recipient);
     assert_eq!(client.get_fee_percentage(), 500);
     assert!(used <= GAS_INIT_MAX, "init() consumed {used} CPU insns, limit is {GAS_INIT_MAX}");
+}
+
+// ---------------------------------------------------------------------------
+// Table-driven error-variant tests (issue #97)
+// ---------------------------------------------------------------------------
+//
+// One test entry per TipError variant (#1–#16).  Each entry maps a
+// TipError discriminant to a human-readable label and a closure that
+// triggers that exact error within a freshly-initialised TestEnv.
+//
+// Variants that are unreachable in the current implementation (e.g.  #7
+// NoTips, #5 TransferFailed) are documented as such but still listed so
+// the table is always complete.
+
+/// A table-driven error test case: (error, label, closure).
+type ErrorTestCase = (TipError, &'static str, fn(&TestEnv));
+
+/// Build the complete 16-entry error-variant test table.
+fn error_test_table() -> [ErrorTestCase; 16] {
+    [
+        // #1  CreatorAlreadyExists – register the same address twice.
+        (
+            TipError::CreatorAlreadyExists,
+            "#1 CreatorAlreadyExists — register twice",
+            |t| {
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "Alice"),
+                    &s(&t.env, ""),
+                );
+                // Second registration from the same address panics.
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice2"),
+                    &s(&t.env, "A"),
+                    &s(&t.env, ""),
+                );
+            },
+        ),
+        // #2  CreatorNotFound – tip to an unregistered address.
+        (
+            TipError::CreatorNotFound,
+            "#2 CreatorNotFound — tip to unregistered creator",
+            |t| {
+                let bob = Address::generate(&t.env);
+                let stranger = Address::generate(&t.env);
+                t.stellar_client().mint(&bob, &10_000);
+                t.tip_client().tip(&bob, &stranger, &t.token_id, &100, &s(&t.env, ""));
+            },
+        ),
+        // #3  UsernameTaken – two creators claim the same username.
+        (
+            TipError::UsernameTaken,
+            "#3 UsernameTaken — duplicate username",
+            |t| {
+                let alice = Address::generate(&t.env);
+                let bob = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "star"),
+                    &s(&t.env, "A"),
+                    &s(&t.env, ""),
+                );
+                t.tip_client().register(
+                    &bob,
+                    &Symbol::new(&t.env, "star"),
+                    &s(&t.env, "B"),
+                    &s(&t.env, ""),
+                );
+            },
+        ),
+        // #4  InsufficientBalance – withdraw more than balance.
+        (
+            TipError::InsufficientBalance,
+            "#4 InsufficientBalance — withdraw > balance",
+            |t| {
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "Alice"),
+                    &s(&t.env, ""),
+                );
+                // Registered but has 0 balance.
+                t.tip_client().withdraw(&alice, &t.token_id, &100);
+            },
+        ),
+        // #5  TransferFailed – requires the SAC transfer() call to fail.
+        //     Unreachable in the mock environment because mock_all_auths()
+        //     makes every token transfer succeed.  Documented for completeness.
+        (
+            TipError::TransferFailed,
+            "#5 TransferFailed — unreachable in mock (SAC transfer failure)",
+            |_t| {
+                // TransferFailed is not triggerable in the mock environment;
+                // the SAC transfer always succeeds under mock_all_auths().
+                // Mark the row as exercised-by-design in production via
+                // integration tests / manual verification.
+            },
+        ),
+        // #6  InvalidAmount – tip or withdraw with zero or negative amount.
+        (
+            TipError::InvalidAmount,
+            "#6 InvalidAmount — tip zero",
+            |t| {
+                let alice = Address::generate(&t.env);
+                let bob = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "A"),
+                    &s(&t.env, ""),
+                );
+                t.tip_client().tip(&bob, &alice, &t.token_id, &0, &s(&t.env, ""));
+            },
+        ),
+        // #7  NoTips – documented as "currently unreachable".
+        (
+            TipError::NoTips,
+            "#7 NoTips — unreachable (no production code path)",
+            |_t| {
+                // No production code path hits this variant.  It is kept as
+                // a sentinel in the enum for future use.
+            },
+        ),
+        // #8  NotInitialized – call a state-changing function without init.
+        (
+            TipError::NotInitialized,
+            "#8 NotInitialized — register before init",
+            |t| {
+                // Use a raw Env that has a deployed but uninitialized contract.
+                let env = Env::default();
+                env.mock_all_auths();
+                env.ledger().set(LedgerInfo {
+                    timestamp: 1000,
+                    protocol_version: 22,
+                    sequence_number: 100,
+                    network_id: Default::default(),
+                    base_reserve: 10,
+                    min_persistent_entry_ttl: 10,
+                    max_entry_ttl: 1_000_000,
+                    min_temp_entry_ttl: 10,
+                });
+                let contract_id = env.register_contract(None, TipContract);
+                let client = crate::TipContractClient::new(&env, &contract_id);
+                let alice = Address::generate(&env);
+                client.register(
+                    &alice,
+                    &Symbol::new(&env, "alice"),
+                    &String::from_str(&env, "Alice"),
+                    &String::from_str(&env, ""),
+                );
+            },
+        ),
+        // #9  AlreadyInitialized – call init twice.
+        (
+            TipError::AlreadyInitialized,
+            "#9 AlreadyInitialized — init twice",
+            |t| {
+                t.tip_client().init(
+                    &t.admin,
+                    &t.fee_recipient,
+                    &0u32,
+                    &crate::DEFAULT_MAX_CREATORS,
+                    &crate::DEFAULT_MAX_TIPS_PER_CREATOR,
+                    &crate::DEFAULT_MIN_TIP_AMOUNT,
+                );
+            },
+        ),
+        // #10  Paused – try to register while paused.
+        (
+            TipError::Paused,
+            "#10 Paused — register while paused",
+            |t| {
+                t.tip_client().pause(&t.admin);
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "Alice"),
+                    &s(&t.env, ""),
+                );
+            },
+        ),
+        // #11  NotAuthorized – non-admin calls pause.
+        (
+            TipError::NotAuthorized,
+            "#11 NotAuthorized — non-admin pauses",
+            |t| {
+                let rando = Address::generate(&t.env);
+                t.tip_client().pause(&rando);
+            },
+        ),
+        // #12  InvalidInput – display name too long.
+        (
+            TipError::InvalidInput,
+            "#12 InvalidInput — display name too long",
+            |t| {
+                let alice = Address::generate(&t.env);
+                let long_name = s(&t.env, &"a".repeat(65));
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &long_name,
+                    &s(&t.env, ""),
+                );
+            },
+        ),
+        // #13  BalanceNotEmpty – unregister with a non-zero balance.
+        (
+            TipError::BalanceNotEmpty,
+            "#13 BalanceNotEmpty — unregister with balance",
+            |t| {
+                let alice = Address::generate(&t.env);
+                let bob = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "Alice"),
+                    &s(&t.env, ""),
+                );
+                t.stellar_client().mint(&bob, &10_000);
+                t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
+                t.tip_client().unregister(&alice);
+            },
+        ),
+        // #14  CapExceeded – register when creator cap is at limit.
+        (
+            TipError::CapExceeded,
+            "#14 CapExceeded — creator cap reached",
+            |t| {
+                // Lower the cap to 1 after init (TestEnv has a high default).
+                t.tip_client().set_max_creators(&t.admin, &1u32);
+                // First creator OK.
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "A"),
+                    &s(&t.env, ""),
+                );
+                // Second creator hits the cap.
+                let bob = Address::generate(&t.env);
+                t.tip_client().register(
+                    &bob,
+                    &Symbol::new(&t.env, "bob"),
+                    &s(&t.env, "B"),
+                    &s(&t.env, ""),
+                );
+            },
+        ),
+        // #15  FeeRecipientNotSet – tip with non-zero fee but no recipient.
+        (
+            TipError::FeeRecipientNotSet,
+            "#15 FeeRecipientNotSet — fee > 0 but recipient removed",
+            |t| {
+                t.tip_client().set_fee_percentage(&t.admin, &500u32);
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "Alice"),
+                    &s(&t.env, ""),
+                );
+                // Remove the FeeRecipient from storage to simulate corruption.
+                let contract_id = t.contract_id.clone();
+                t.env.as_contract(&contract_id, || {
+                    t.env.storage().instance().remove(&crate::DataKey::FeeRecipient);
+                });
+                let bob = Address::generate(&t.env);
+                t.stellar_client().mint(&bob, &10_000);
+                t.tip_client().tip(&bob, &alice, &t.token_id, &1_000, &s(&t.env, ""));
+            },
+        ),
+        // #16  BelowMinimum – tip amount below the configured minimum.
+        (
+            TipError::BelowMinimum,
+            "#16 BelowMinimum — tip below min_tip_amount",
+            |t| {
+                t.tip_client().set_min_tip_amount(&t.admin, &100);
+                let alice = Address::generate(&t.env);
+                t.tip_client().register(
+                    &alice,
+                    &Symbol::new(&t.env, "alice"),
+                    &s(&t.env, "A"),
+                    &s(&t.env, ""),
+                );
+                let bob = Address::generate(&t.env);
+                t.stellar_client().mint(&bob, &10_000);
+                t.tip_client().tip(&bob, &alice, &t.token_id, &99, &s(&t.env, ""));
+            },
+        ),
+    ]
+}
+
+#[test]
+fn test_error_variants_table_driven() {
+    let table = error_test_table();
+
+    for (variant, label, trigger) in &table {
+        let expected_code = *variant as u32;
+
+        // Unreachable variants have a no-op closure — skip the assertion
+        // but log the skip so they're visible in test output.
+        if *variant == TipError::NoTips || *variant == TipError::TransferFailed {
+            println!("SKIP: {label}");
+            continue;
+        }
+
+        // NotInitialized needs its own raw Env (built inside the closure),
+        // so we pass a dummy TestEnv and let the closure ignore it.
+        if *variant == TipError::NotInitialized {
+            let t = TestEnv::new();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trigger(&t)));
+            match result {
+                Ok(_) => panic!("{label}: expected panic but test passed"),
+                Err(e) => {
+                    let msg = panic_message(e);
+                    assert!(
+                        msg.contains(&format!("#{expected_code}")),
+                        "{label}: expected error #{expected_code}, got: {msg}"
+                    );
+                }
+            }
+            continue;
+        }
+
+        let t = TestEnv::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trigger(&t)));
+        match result {
+            Ok(_) => panic!("{label}: expected panic but test passed"),
+            Err(e) => {
+                let msg = panic_message(e);
+                assert!(
+                    msg.contains(&format!("#{expected_code}")),
+                    "{label}: expected error #{expected_code}, got: {msg}"
+                );
+            }
+        }
+    }
+}
+
+/// Extract a string message from a caught panic payload.
+fn panic_message(e: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = e.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = e.downcast_ref::<&str>() {
+        s.to_string()
+    } else {
+        "<unknown panic payload>".to_string()
+    }
 }
