@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Test: `test_fee_recipient_compromise_response_runbook` – adversarial test that validates the full admin-key-compromise recovery sequence (pause → rotate admin → restore fee recipient → unpause → verify fee routing) documented in `docs/ADMIN_RUNBOOK.md` (Issue #87)
 - CI: `changelog` job that diffs `src/lib.rs`'s public API surface against the PR base and fails when `CHANGELOG.md` is not updated (Issue #112)
 - `scripts/check_changelog.sh` – the bash check invoked by the new job; reusable locally via `BASE_REF=origin/main HEAD_REF=HEAD bash scripts/check_changelog.sh`
 - `make check-changelog` – convenience target for running the check offline

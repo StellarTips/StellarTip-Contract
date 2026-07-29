@@ -357,6 +357,7 @@ cargo test test_set_admin
 cargo test test_set_fee_percentage
 cargo test test_set_fee_recipient
 cargo test unauthorized
+cargo test test_fee_recipient_compromise_response_runbook
 ```
 
 Expected result for each command: exit status `0` and a final line containing
