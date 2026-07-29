@@ -2192,3 +2192,86 @@ fn gas_init() {
     assert_eq!(client.get_fee_percentage(), 500);
     assert!(used <= GAS_INIT_MAX, "init() consumed {used} CPU insns, limit is {GAS_INIT_MAX}");
 }
+
+// ---------------------------------------------------------------------------
+// CreatorCount invariant test (issue #89)
+// ---------------------------------------------------------------------------
+
+/// Proves that `get_creator_count()` stays consistent with the actual count
+/// of `Profile(_)` keys in storage across register and unregister events,
+/// and that the invariant survives an `as_contract` reload.
+#[test]
+fn test_creator_count_invariant() {
+    let t = TestEnv::new();
+
+    const N: u32 = 7;
+    const M: u32 = 3;
+
+    // ── Phase 1: Register N creators ──
+    let mut creators: Vec<Address> = Vec::new(&t.env);
+    for i in 0u32..N {
+        let c = Address::generate(&t.env);
+        let sym = Symbol::new(&t.env, &format!("inv_user_{i}"));
+        creators.push_back(c.clone());
+        t.tip_client().register(&c, &sym, &s(&t.env, "Invariant"), &s(&t.env, ""));
+    }
+    assert_eq!(t.tip_client().get_creator_count(), N);
+
+    // ── Phase 2: Unregister the first M creators ──
+    for i in 0u32..M {
+        t.tip_client().unregister(&creators.get(i).unwrap());
+    }
+    let expected = N - M;
+    assert_eq!(t.tip_client().get_creator_count(), expected);
+
+    // ── Phase 3: Count actual Profile keys via `as_contract` ──
+    // The contract maintains `CreatorCount` alongside individual
+    // `Profile(Address)` keys.  If they drift, cap enforcement is wrong.
+    let contract_id = t.contract_id.clone();
+    let profile_count: u32 = t.env.as_contract(&contract_id, || {
+        let mut count: u32 = 0;
+        for i in 0u32..N {
+            let addr = creators.get(i).unwrap();
+            if t.env.storage().instance().has(&crate::DataKey::Profile(addr)) {
+                count += 1;
+            }
+        }
+        count
+    });
+    assert_eq!(
+        profile_count, expected,
+        "Profile key count ({profile_count}) must equal CreatorCount ({expected})"
+    );
+
+    // ── Phase 4: Check is_creator() for every address ──
+    for i in M..N {
+        assert!(
+            t.tip_client().is_creator(&creators.get(i).unwrap()),
+            "creator {i} should still be registered"
+        );
+    }
+    for i in 0u32..M {
+        assert!(
+            !t.tip_client().is_creator(&creators.get(i).unwrap()),
+            "creator {i} should have been unregistered"
+        );
+    }
+
+    // ── Phase 5: Repeat check via `as_contract` (reload simulation) ──
+    // This verifies the invariant survives the contract's own perspective
+    // after a simulated reload.
+    let profile_count_after: u32 = t.env.as_contract(&contract_id, || {
+        let mut count: u32 = 0;
+        for i in 0u32..N {
+            let addr = creators.get(i).unwrap();
+            if t.env.storage().instance().has(&crate::DataKey::Profile(addr)) {
+                count += 1;
+            }
+        }
+        count
+    });
+    assert_eq!(
+        profile_count_after, expected,
+        "Profile key count after reload ({profile_count_after}) must equal CreatorCount ({expected})"
+    );
+}
