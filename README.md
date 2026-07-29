@@ -120,6 +120,19 @@ make lint
 make check      # fmt + lint + test + wasm-build
 ```
 
+### Fork Tests (against testnet)
+
+Fork tests validate the contract against a forked snapshot of the Stellar
+testnet. They are gated behind the `fork` feature and ignored by default.
+
+```bash
+# Prerequisites: soroban-sdk ≥ 22.x, a testnet RPC endpoint
+cargo test --features fork -- --ignored
+```
+
+These tests currently contain stubs pending the SDK upgrade to 22.x
+(see `tests/fork.rs`). A CI job runs them nightly on schedule.
+
 ### Deploy (testnet)
 
 ```bash
