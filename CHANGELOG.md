@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Cargo.toml`: `[features]` section with `fork = []` flag (Issue #88)
 - CI: nightly `fork-test` job that runs `cargo test --features fork -- --ignored` once per night (Issue #88)
 - README: fork-test documentation explaining prerequisites and how to run `cargo test --features fork` (Issue #88)
+- Test: `test_creator_count_invariant` – proves that `get_creator_count()` stays consistent with the actual count of `Profile(_)` keys across register/unregister events, and that the invariant survives an `as_contract` reload (Issue #89)
 - CI: `changelog` job that diffs `src/lib.rs`'s public API surface against the PR base and fails when `CHANGELOG.md` is not updated (Issue #112)
 - `scripts/check_changelog.sh` – the bash check invoked by the new job; reusable locally via `BASE_REF=origin/main HEAD_REF=HEAD bash scripts/check_changelog.sh`
 - `make check-changelog` – convenience target for running the check offline
