@@ -340,7 +340,7 @@ proptest! {
                     // Unpause (admin only).
                     t.tip_client().unpause(&t.admin);
                 }
-                2..=5 => {
+                2..=4 => {
                     // Tip to c1.
                     let is_paused = t.tip_client().is_paused();
                     let tip_amount = (rng.next() % 10_000_000) as i128 + 1;
@@ -363,7 +363,7 @@ proptest! {
                         }
                     }
                 }
-                6..=8 => {
+                5..=7 => {
                     // Tip to c2.
                     let is_paused = t.tip_client().is_paused();
                     let tip_amount = (rng.next() % 10_000_000) as i128 + 1;
@@ -386,7 +386,7 @@ proptest! {
                         }
                     }
                 }
-                _ => {
+                8 => {
                     // Withdraw from c1 — only if not paused.
                     let is_paused = t.tip_client().is_paused();
                     if !is_paused && expected_balance1 > 0 {
@@ -401,6 +401,22 @@ proptest! {
                         }
                     }
                 }
+                9 => {
+                    // Withdraw from c2 — only if not paused.
+                    let is_paused = t.tip_client().is_paused();
+                    if !is_paused && expected_balance2 > 0 {
+                        let wd = (rng.next() % (expected_balance2 as u64 + 1)) as i128;
+                        if wd > 0 {
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                t.tip_client().withdraw(&c2, &t.token_id, &wd);
+                            }));
+                            if result.is_ok() {
+                                expected_balance2 -= wd;
+                            }
+                        }
+                    }
+                }
+                _ => unreachable!("op = rng.next() % 10 is always 0..=9"),
             }
         }
 
