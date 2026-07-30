@@ -72,6 +72,39 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10000))]
 
     // -------------------------------------------------------------------
+    // Issue #90 — i128 boundary amount handling
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn test_i128_boundary_amount_no_overflow(
+        amount in prop_oneof![
+            9 => 1i128..1_000_000_000_001i128,
+            1 => Just(1i128),
+            1 => Just(1_000_000_000_000i128),
+        ],
+    ) {
+        let t = FuzzEnv::new(0);
+
+        let creator = Address::generate(&t.env);
+        t.tip_client().register(
+            &creator,
+            &Symbol::new(&t.env, "creator"),
+            &s(&t.env, "Creator"),
+            &s(&t.env, "Bio"),
+        );
+
+        let tipper = Address::generate(&t.env);
+        t.stellar_client().mint(&tipper, &amount);
+        t.tip_client().tip(&tipper, &creator, &t.token_id, &amount, &s(&t.env, "ok"));
+
+        prop_assert_eq!(
+            t.tip_client().get_balance(&creator, &t.token_id),
+            amount,
+            "amount boundary: balance mismatch after tip"
+        );
+    }
+
+    // -------------------------------------------------------------------
     // Issue #95 — full token-conservation invariant
     // -------------------------------------------------------------------
 
