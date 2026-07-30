@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate std;
 
 use proptest::prelude::*;
 use soroban_sdk::{
