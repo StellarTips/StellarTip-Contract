@@ -2209,9 +2209,12 @@ fn test_creator_count_invariant() {
 
     // ── Phase 1: Register N creators ──
     let mut creators: Vec<Address> = Vec::new(&t.env);
+    let usernames: [&str; 7] = [
+        "inv_0", "inv_1", "inv_2", "inv_3", "inv_4", "inv_5", "inv_6",
+    ];
     for i in 0u32..N {
         let c = Address::generate(&t.env);
-        let sym = Symbol::new(&t.env, &format!("inv_user_{i}"));
+        let sym = Symbol::new(&t.env, usernames[i as usize]);
         creators.push_back(c.clone());
         t.tip_client().register(&c, &sym, &s(&t.env, "Invariant"), &s(&t.env, ""));
     }
@@ -2272,6 +2275,7 @@ fn test_creator_count_invariant() {
     });
     assert_eq!(
         profile_count_after, expected,
-        "Profile key count after reload ({profile_count_after}) must equal CreatorCount ({expected})"
+        "Profile key count after reload ({profile_count_after}) must equal CreatorCount \
+         ({expected})"
     );
 }
