@@ -2271,5 +2271,3 @@ fn test_fee_recipient_compromise_response_runbook() {
     // Original fee recipient balance is unchanged after recovery.
     assert_eq!(t.token_client().balance(&t.fee_recipient), orig_recipient_balance);
 }
-
-
