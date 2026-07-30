@@ -2242,11 +2242,6 @@ fn test_fee_recipient_compromise_response_runbook() {
     t.tip_client().set_admin(&t.admin, &new_admin);
     assert_eq!(t.tip_client().get_admin(), Some(new_admin.clone()));
 
-    // The old admin can no longer authorize admin calls.
-    let rando = Address::generate(&t.env);
-    t.tip_client().set_fee_recipient(&new_admin, &rando);
-    assert_eq!(t.tip_client().get_fee_recipient(), Some(rando.clone()));
-
     // ── Step 4: New admin restores fee recipient to the approved address. ──
     let safe_recipient = Address::generate(&t.env);
     t.tip_client().set_fee_recipient(&new_admin, &safe_recipient);

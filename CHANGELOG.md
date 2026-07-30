@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Test: `test_fee_recipient_compromise_response_runbook` – adversarial test that validates the full admin-key-compromise recovery sequence (pause → rotate admin → restore fee recipient → unpause → verify fee routing) documented in `docs/ADMIN_RUNBOOK.md` (Issue #87)
 - CI: `changelog` job that diffs `src/lib.rs`'s public API surface against the PR base and fails when `CHANGELOG.md` is not updated (Issue #112)
 - `scripts/check_changelog.sh` – the bash check invoked by the new job; reusable locally via `BASE_REF=origin/main HEAD_REF=HEAD bash scripts/check_changelog.sh`
 - `make check-changelog` – convenience target for running the check offline
@@ -71,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Issue #17: Platform Fee Mechanism
   - Added configurable fee basis points and fee recipient
   - Fee is deducted from each tip and sent to the recipient immediately
+- Issue #87: Fee Recipient Compromise Runbook Test
+  - Added adversarial test `test_fee_recipient_compromise_response_runbook`
+    that validates the full admin-key-compromise recovery sequence (pause →
+    rotate admin → restore fee recipient → unpause → verify fee routing)
+    documented in `docs/ADMIN_RUNBOOK.md`
 - Issue #20: Profile Updates & Account Deletion
   - Added `update_profile()` for in-place profile edits
   - Added `unregister()` that requires zero balance across all tokens
